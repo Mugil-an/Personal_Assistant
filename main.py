@@ -1,27 +1,58 @@
+import logging
+import sys
+
 from auth import authenticate
-from gmail_reader import fetch_emails
 from calendar_manager import create_event
 from daily_plan import get_today_schedule
+from gmail_reader import fetch_emails
 from notifier import send_whatsapp
 
-def run_assistant():
-    # Step 1: Login to Google
-    print("🔐 Authenticating...")
-    gmail, calendar = authenticate()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+def run_assistant() -> None:
+    """Run the full assistant workflow once.
+
+    1. Authenticate to Google.
+    2. Fetch meeting-related emails and create calendar events.
+    3. Build today's schedule and send it via WhatsApp.
+    """
+
+    try:
+        logger.info("Authenticating with Google APIs")
+        gmail, calendar = authenticate()
+    except Exception as exc:
+        logger.error("Authentication failed: %s", exc)
+        return
 
     # Step 2: Read & Parse Emails
-    print("📩 Checking for meeting emails...")
+    logger.info("Checking for meeting-related emails")
     new_emails = fetch_emails(gmail)
     for email in new_emails:
-        create_event(calendar, email['subject'], email['body'])
+        subject = email.get("subject", "")
+        body = email.get("body", "")
+        try:
+            create_event(calendar, subject, body)
+        except Exception as exc:
+            logger.error("Failed to create event for email '%s': %s", subject, exc)
 
     # Step 3: Get Today's Schedule & Notify
-    print("📅 Fetching today's schedule...")
+    logger.info("Fetching today's schedule from calendar")
     schedule = get_today_schedule(calendar)
-    
-    print("📱 Sending to WhatsApp...")
+
+    logger.info("Sending schedule to WhatsApp")
     send_whatsapp(schedule)
-    print("🏁 All tasks complete!")
+    logger.info("All tasks complete")
+
 
 if __name__ == "__main__":
-    run_assistant()
+    try:
+        run_assistant()
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user; exiting.")
+        sys.exit(1)

@@ -1,9 +1,14 @@
 # Environment variables
 .env
 
-# Virtual environment
-venv/
-__pycache__/
-
-# Google tokens
+# Google API credentials and tokens
 credentials.json
+token.pickle
+*.pickle
+
+# Python cache and virtual environments
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
