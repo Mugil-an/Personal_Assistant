@@ -5,3 +5,13 @@ dateparser
 python-dotenv
 twilio
 python-dateutil
+# Backend (FastAPI)
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.0
+
+# Frontend (Streamlit)
+streamlit==1.29.0
+
+# HTTP client for Streamlit
+requests==2.31.0
