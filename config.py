@@ -8,6 +8,8 @@ load_dotenv()
 
 GOOGLE_CREDENTIALS_FILE: str = os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json")
 GOOGLE_TOKEN_FILE: str = os.getenv("GOOGLE_TOKEN_FILE", "token.pickle")
+GEMINI_API_KEY : str = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", ""))
+GEMINI_MODEL : str = os.getenv("GEMINI_MODEL","gemini_pro")
 
 # Gmail search query for meeting-related emails
 GMAIL_QUERY: str = os.getenv(
@@ -33,32 +35,14 @@ try:
 except ValueError:
     DEFAULT_EVENT_DURATION_MIN = 60
 
-# --- Twilio / WhatsApp configuration ---
+# --- Email notification configuration (Gmail SMTP) ---
 
-TWILIO_ACCOUNT_SID: str | None = os.getenv("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN: str | None = os.getenv("TWILIO_AUTH_TOKEN")
-WHATSAPP_FROM: str | None = os.getenv("WHATSAPP_FROM")
-WHATSAPP_TO: str | None = os.getenv("WHATSAPP_TO")
+# The Gmail address you want to send notifications FROM
+NOTIFY_EMAIL_FROM: str | None = os.getenv("NOTIFY_EMAIL_FROM")
 
+# Gmail App Password (NOT your regular password).
+# Generate one at: https://myaccount.google.com/apppasswords
+NOTIFY_EMAIL_PASSWORD: str | None = os.getenv("NOTIFY_EMAIL_PASSWORD")
 
-def validate_twilio_config() -> None:
-    """Raise a clear error if mandatory Twilio settings are missing.
-
-    This is meant to be called at startup before attempting to send messages.
-    """
-
-    missing = []
-    if not TWILIO_ACCOUNT_SID:
-        missing.append("TWILIO_ACCOUNT_SID")
-    if not TWILIO_AUTH_TOKEN:
-        missing.append("TWILIO_AUTH_TOKEN")
-    if not WHATSAPP_FROM:
-        missing.append("WHATSAPP_FROM")
-    if not WHATSAPP_TO:
-        missing.append("WHATSAPP_TO")
-
-    if missing:
-        raise RuntimeError(
-            f"Missing required Twilio configuration values: {', '.join(missing)}. "
-            "Check your environment variables or .env file."
-        )
+# Default recipient email (used for single-user / main.py mode)
+NOTIFY_EMAIL_TO: str | None = os.getenv("NOTIFY_EMAIL_TO")
