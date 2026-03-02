@@ -1,48 +1,58 @@
 import logging
-
-from twilio.base.exceptions import TwilioRestException
-from twilio.rest import Client
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 from config import (
-    TWILIO_ACCOUNT_SID,
-    TWILIO_AUTH_TOKEN,
-    WHATSAPP_FROM,
-    WHATSAPP_TO,
-    validate_twilio_config,
+    NOTIFY_EMAIL_FROM,
+    NOTIFY_EMAIL_PASSWORD,
+    NOTIFY_EMAIL_TO,
 )
-
 
 logger = logging.getLogger(__name__)
 
 
-def _get_twilio_client() -> Client:
-    """Return an initialized Twilio client after validating config."""
+def send_whatsapp(message_body: str, to: str | None = None) -> None:
+    """Send the daily schedule as an email via Gmail SMTP.
 
-    validate_twilio_config()
-    assert TWILIO_ACCOUNT_SID is not None
-    assert TWILIO_AUTH_TOKEN is not None
-    return Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-
-
-def send_whatsapp(message_body: str) -> None:
-    """Send a WhatsApp message using Twilio.
-
-    Raises an exception only for configuration problems; Twilio API errors
-    are logged but do not crash the whole process.
+    Parameters
+    ----------
+    message_body:
+        The text content of the notification.
+    to:
+        Optional recipient email address. Falls back to NOTIFY_EMAIL_TO
+        from config (single-user default).
     """
+    recipient = to or NOTIFY_EMAIL_TO
 
-    try:
-        client = _get_twilio_client()
-    except RuntimeError as exc:
-        logger.error("Twilio configuration error: %s", exc)
+    if not NOTIFY_EMAIL_FROM or not NOTIFY_EMAIL_PASSWORD:
+        logger.error(
+            "Email notification is not configured. "
+            "Set NOTIFY_EMAIL_FROM and NOTIFY_EMAIL_PASSWORD in your .env file."
+        )
         return
 
+    if not recipient:
+        logger.error("No recipient email address. Set NOTIFY_EMAIL_TO in .env or pass 'to' argument.")
+        return
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = "\U0001f4c5 Your Daily Schedule"
+    msg["From"]    = NOTIFY_EMAIL_FROM
+    msg["To"]      = recipient
+    msg.attach(MIMEText(message_body, "plain"))
+
     try:
-        message = client.messages.create(
-            from_=WHATSAPP_FROM,
-            body=message_body,
-            to=WHATSAPP_TO,
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(NOTIFY_EMAIL_FROM, NOTIFY_EMAIL_PASSWORD)
+            smtp.send_message(msg)
+        logger.info("Schedule email sent to %s", recipient)
+    except smtplib.SMTPAuthenticationError:
+        logger.error(
+            "Gmail authentication failed for %s. "
+            "Make sure you are using an App Password, not your regular Gmail password. "
+            "Generate one at https://myaccount.google.com/apppasswords",
+            NOTIFY_EMAIL_FROM,
         )
-        logger.info("WhatsApp message sent. SID=%s", message.sid)
-    except TwilioRestException as exc:
-        logger.error("Failed to send WhatsApp message via Twilio: %s", exc)
+    except Exception as exc:
+        logger.error("Failed to send email notification: %s", exc)

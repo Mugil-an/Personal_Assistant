@@ -1,327 +1,379 @@
-"""Streamlit frontend for Personal Assistant."""
-import streamlit as st
-import requests
-import json
-from datetime import datetime
+﻿"""Streamlit UI - Personal Assistant (multi-user, backed by FastAPI)."""
 
-# Page config
+import datetime
+import requests
+import streamlit as st
+
+# --- Page config (must be first) ---
 st.set_page_config(
     page_title="Personal Assistant",
-    page_icon="📋",
+    page_icon="PA",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Styling
+# --- Global styles ---
 st.markdown("""
-    <style>
-    .main {
-        padding: 0rem 1rem;
-    }
-    .stButton > button {
-        width: 100%;
-        border-radius: 5px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+<style>
+.block-container { padding-top: 1.4rem; padding-bottom: 1rem; }
+.stMetric        { background:#f8f9fb; border-radius:8px; padding:8px; }
+.badge { display:inline-block; padding:2px 9px; border-radius:12px;
+         font-size:.75rem; font-weight:600; margin-left:4px; }
+.b-blue   { background:#dbeafe; color:#1d4ed8; }
+.b-green  { background:#dcfce7; color:#15803d; }
+.b-yellow { background:#fef9c3; color:#a16207; }
+.b-red    { background:#fee2e2; color:#b91c1c; }
+.b-gray   { background:#f1f5f9; color:#475569; }
+</style>
+""", unsafe_allow_html=True)
 
-# API base URL
-API_BASE_URL = "http://localhost:8000"
+# --- Constants ---
+API = "http://localhost:8000"
 
-# Session state
-if "api_status" not in st.session_state:
-    st.session_state.api_status = None
+TIMEZONES = [
+    "UTC","Asia/Kolkata","Asia/Singapore","Asia/Tokyo","Asia/Dubai",
+    "Europe/London","Europe/Paris","America/New_York",
+    "America/Chicago","America/Los_Angeles","Australia/Sydney",
+]
 
+INTENT_COLOR = {
+    "Event Scheduling":    "b-blue",
+    "Task Assignment":     "b-yellow",
+    "Information Sharing": "b-gray",
+    "Spam":                "b-red",
+}
 
-def check_api_health():
-    """Check if API is running."""
+# --- API helpers ---
+
+def _get(path, **params):
     try:
-        response = requests.get(f"{API_BASE_URL}/", timeout=5)
-        return response.status_code == 200
-    except:
-        return False
-
-
-def fetch_config():
-    """Fetch current configuration from API."""
-    try:
-        response = requests.get(f"{API_BASE_URL}/api/config", timeout=10)
-        response.raise_for_status()
-        return response.json()
+        r = requests.get(f"{API}{path}", params=params, timeout=15)
+        r.raise_for_status()
+        return r.json(), None
+    except requests.exceptions.ConnectionError:
+        return None, "API server is offline. Run `python run.py` first."
     except Exception as e:
-        st.error(f"Failed to fetch config: {str(e)}")
-        return None
+        return None, str(e)
 
-
-def run_full_assistant(gmail_query, max_results, send_whatsapp):
-    """Run the full assistant workflow."""
+def _post(path, payload):
     try:
-        with st.spinner("Running assistant workflow..."):
-            response = requests.post(
-                f"{API_BASE_URL}/api/run-assistant",
-                json={
-                    "gmail_query": gmail_query,
-                    "max_results": max_results,
-                    "send_whatsapp": send_whatsapp,
-                },
-                timeout=30,
-            )
-            response.raise_for_status()
-            return response.json()
+        r = requests.post(f"{API}{path}", json=payload, timeout=60)
+        r.raise_for_status()
+        return r.json(), None
+    except requests.exceptions.ConnectionError:
+        return None, "API server is offline. Run `python run.py` first."
     except Exception as e:
-        st.error(f"Error running assistant: {str(e)}")
-        return None
+        return None, str(e)
 
+"""Sidebar with sign-in and status."""
+with st.sidebar:
+    st.title("Personal Assistant")
+    st.divider()
 
-def fetch_emails(query, max_results):
-    """Fetch emails from Gmail."""
-    try:
-        with st.spinner("Fetching emails..."):
-            response = requests.post(
-                f"{API_BASE_URL}/api/fetch-emails",
-                json={"query": query, "max_results": max_results},
-                timeout=30,
-            )
-            response.raise_for_status()
-            return response.json()
-    except Exception as e:
-        st.error(f"Error fetching emails: {str(e)}")
-        return None
+    # Server health check
+    health, err = _get("/")
+    if err:
+        st.error("API offline. Run: python run.py")
+        st.stop()
+    st.success("API running")
+    st.divider()
 
-
-def get_schedule():
-    """Get today's schedule."""
-    try:
-        with st.spinner("Fetching schedule..."):
-            response = requests.get(
-                f"{API_BASE_URL}/api/schedule",
-                timeout=10,
-            )
-            response.raise_for_status()
-            return response.json()
-    except Exception as e:
-        st.error(f"Error fetching schedule: {str(e)}")
-        return None
-
-
-def create_event(subject, description):
-    """Create a calendar event."""
-    try:
-        with st.spinner("Creating event..."):
-            response = requests.post(
-                f"{API_BASE_URL}/api/create-event",
-                json={"subject": subject, "description": description},
-                timeout=10,
-            )
-            response.raise_for_status()
-            return response.json()
-    except Exception as e:
-        st.error(f"Error creating event: {str(e)}")
-        return None
-
-
-# Header
-st.title("📋 Personal Assistant Dashboard")
-st.markdown("Manage your emails, calendar events, and daily schedule")
-
-# Check API status
-if not check_api_health():
-    st.error(
-        "❌ **API is not running!**\n\n"
-        "Please start the FastAPI backend:\n"
-        "```bash\npython app.py\n```\n"
-        "or\n"
-        "```bash\nuvicorn app:app --reload\n```"
+    # --- Sign-in section ---
+    st.subheader("Sign In")
+    st.markdown(
+        f'<a href="{API}/signup" target="_blank">'
+        '<button style="width:100%;background:#4285F4;color:white;border:none;'
+        'padding:8px;border-radius:6px;cursor:pointer;font-size:14px;">'
+        'Sign in with Google</button></a>',
+        unsafe_allow_html=True,
     )
+    st.caption("After sign-in, copy the **user_id** shown on the page and paste below.")
+
+    user_id_input = st.text_input(
+        "Your User ID",
+        value=st.session_state.get("user_id", ""),
+        placeholder="Paste user_id here...",
+    )
+
+    if user_id_input and user_id_input != st.session_state.get("user_id"):
+        status, err = _get("/status", user_id=user_id_input)
+        if err or not status:
+            st.error("User not found. Please sign in first.")
+        else:
+            st.session_state["user_id"] = user_id_input
+            st.session_state["user"]    = status
+            st.rerun()
+
+    if st.session_state.get("user"):
+        u = st.session_state["user"]
+        st.success(u["email"])
+        st.caption(f"Notify: **{u['notify_time']}** ({u['timezone']})")
+        st.caption(u.get("notify_email") or "No notification email set")
+        if st.button("Sign out", use_container_width=True):
+            st.session_state.clear()
+            st.rerun()
+
+
+# --- Require login ---
+if not st.session_state.get("user_id"):
+    st.info("Sign in with Google using the sidebar to get started.")
     st.stop()
 
-st.success("✅ API is running")
+uid  = st.session_state["user_id"]
+user = st.session_state["user"]
 
-# Fetch config once and store in session state
-if "config" not in st.session_state:
-    st.session_state.config = fetch_config()
+# Fetch config once
+if "cfg" not in st.session_state:
+    cfg, _ = _get("/api/config")
+    st.session_state["cfg"] = cfg or {}
+cfg = st.session_state["cfg"]
 
-config = st.session_state.config
-
-# Sidebar
-with st.sidebar:
-    st.header("⚙️ Configuration")
-
-    if config:
-        st.subheader("Current Settings")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.metric("Timezone", config.get("timezone", "N/A"))
-            st.metric("Event Duration (min)", config.get("default_event_duration", "N/A"))
-        
-        with col2:
-            st.metric("Calendar ID", config.get("calendar_id", "N/A")[:20] + "...")
-            st.metric("Max Emails", config.get("gmail_max_results", "N/A"))
-
-# Main content
-tab1, tab2, tab3, tab4 = st.tabs(
-    ["🏠 Dashboard", "📧 Emails", "📅 Create Event", "⚙️ Advanced"]
+# --- Tabs ---
+t_dash, t_email, t_cal, t_prefs = st.tabs(
+    ["Dashboard", "Emails", "Calendar", "Preferences"]
 )
 
-# Tab 1: Dashboard
-with tab1:
-    st.header("Dashboard")
-    
-    if not config:
-        st.error("⚠️ Failed to load configuration. Please check if the API is running.")
-        st.stop()
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("▶️ Run Full Assistant", use_container_width=True, key="run_full"):
-            result = run_full_assistant(config["gmail_query"], config["gmail_max_results"], True)
-            if result:
-                st.success(f"✅ {result.get('message', 'Success')}")
-                st.write(f"📧 Emails processed: {result.get('emails_processed', 0)}")
-                st.write(f"📅 Events created: {result.get('events_created', 0)}")
-    
-    with col2:
-        if st.button("📅 Get Today's Schedule", use_container_width=True, key="get_schedule"):
-            result = get_schedule()
-            if result:
-                st.session_state.schedule_result = result
-    
-    with col3:
-        if st.button("🔄 Refresh", use_container_width=True, key="refresh"):
-            st.rerun()
-    
+# --- DASHBOARD ---
+with t_dash:
+
+    # Stats row
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Notify Time",   user["notify_time"])
+    c2.metric("Timezone",      user["timezone"])
+    c3.metric("Max Emails",    cfg.get("gmail_max_results", "-"))
+    c4.metric("Event Duration", f"{cfg.get('default_event_duration','-')} min")
+
     st.divider()
-    
+
+    # Run assistant
+    col_a, col_b = st.columns([2, 1])
+    with col_a:
+        send_email_opt = st.checkbox(
+            "Send me today's schedule by email after running",
+            value=False,
+        )
+    with col_b:
+        run_btn = st.button("Run Assistant Now", use_container_width=True, type="primary")
+
+    if run_btn:
+        with st.spinner("Fetching emails, analysing with Gemini, creating events..."):
+            res, err = _post("/api/run-assistant", {
+                "user_id":    uid,
+                "send_email": send_email_opt,
+            })
+        if err:
+            st.error(err)
+        else:
+            st.success(
+                f"Done - **{res['emails_processed']}** emails processed, "
+                f"**{res['events_created']}** events added to calendar."
+            )
+            if res.get("details"):
+                with st.expander("See email details"):
+                    for item in res["details"]:
+                        icon  = "[CAL]" if item["event_created"] else "[MAIL]"
+                        color = INTENT_COLOR.get(item["intent"], "b-gray")
+                        st.markdown(
+                            f"{icon} **{item['subject'] or '(no subject)'}** "
+                            f'<span class="badge {color}">{item["intent"] or "?"}</span><br>'
+                            f'<small>{item["summary"] or ""}</small>',
+                            unsafe_allow_html=True,
+                        )
+
+    st.divider()
+
+    # Today's schedule
     st.subheader("Today's Schedule")
-    if "schedule_result" in st.session_state and st.session_state.schedule_result:
-        result = st.session_state.schedule_result
-        if result.get("schedule"):
-            for event in result["schedule"]:
-                # Handle both dict and string event formats
-                if isinstance(event, dict):
-                    with st.container(border=True):
-                        col1, col2 = st.columns([3, 1])
-                        with col1:
-                            st.write(f"**{event.get('summary', 'Untitled')}**")
-                            st.caption(f"📍 {event.get('start', 'TBD')} - {event.get('end', 'TBD')}")
-                        with col2:
-                            st.write(event.get('description', 'No description'))
-                elif isinstance(event, str):
-                    # If event is a string, display it directly
-                    with st.container(border=True):
-                        st.write(event)
+    if st.button("Load / Refresh Schedule"):
+        data, err = _get("/api/schedule", user_id=uid)
+        if err:
+            st.error(err)
         else:
-            st.info("No events scheduled for today")
-    else:
-        st.info("Click 'Get Today's Schedule' to load events")
+            st.session_state["schedule"] = data.get("schedule", "")
 
-# Tab 2: Emails
-with tab2:
-    st.header("Email Management")
-    
-    if not config:
-        st.error("⚠️ Failed to load configuration. Please check if the API is running.")
+    # Auto-load on first visit
+    if "schedule" not in st.session_state:
+        data, err = _get("/api/schedule", user_id=uid)
+        if not err:
+            st.session_state["schedule"] = data.get("schedule", "")
+
+    sched = st.session_state.get("schedule", "")
+    if sched:
+        for line in sched.strip().split("\n"):
+            if line.strip():
+                st.markdown(line)
     else:
-        col1, col2 = st.columns(2)
-        with col1:
-            gmail_query = st.text_input(
-                "Gmail Search Query",
-                value=config.get("gmail_query", "subject:meeting OR subject:appointment"),
-                help="Use Gmail search syntax",
-            )
-        with col2:
-            max_results = st.number_input(
-                "Max Results",
-                min_value=1,
-                max_value=100,
-                value=config.get("gmail_max_results", 20),
-            )
-        
-        if st.button("🔍 Fetch Emails", use_container_width=True, key="fetch_emails"):
-            result = fetch_emails(gmail_query, int(max_results))
-            if result:
-                st.session_state.emails_result = result
-        
-        st.divider()
-        
-        if "emails_result" in st.session_state and st.session_state.emails_result:
-            result = st.session_state.emails_result
-            st.success(f"Found {result.get('count', 0)} emails")
-            
-            for email in result.get("emails", []):
-                with st.container(border=True):
-                    st.write(f"**{email.get('subject', 'No Subject')}**")
-                    st.caption(f"From: {email.get('sender', 'Unknown')}")
-                    with st.expander("View Body"):
-                        st.write(email.get("body", "No content"))
+        st.info("No events scheduled for today.")
+
+# --- EMAILS ---
+with t_email:
+    st.header("Emails")
+    st.caption("Fetches your Gmail messages and runs Gemini analysis on each one.")
+
+    qcol, ncol = st.columns([3, 1])
+    with qcol:
+        query = st.text_input(
+            "Gmail search query",
+            value=cfg.get("gmail_query",
+                          "subject:meeting OR subject:appointment OR subject:scheduled"),
+        )
+    with ncol:
+        max_r = st.number_input(
+            "Max results", min_value=1, max_value=100,
+            value=int(cfg.get("gmail_max_results", 20)),
+        )
+
+    if st.button("Fetch & Analyse", use_container_width=True, type="primary"):
+        with st.spinner("Fetching and analysing emails with Gemini..."):
+            data, err = _post("/api/fetch-emails", {
+                "user_id": uid, "query": query, "max_results": int(max_r),
+            })
+        if err:
+            st.error(err)
         else:
-            st.info("Click 'Fetch Emails' to load messages")
+            st.session_state["emails"] = data
 
-# Tab 3: Create Event
-with tab3:
-    st.header("Create Calendar Event")
-    
-    subject = st.text_input(
-        "Event Subject",
-        placeholder="e.g., Team Meeting, Client Call",
-    )
-    
-    description = st.text_area(
-        "Event Description",
-        placeholder="Event details and notes...",
-        height=120,
-    )
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("✅ Create Event", use_container_width=True, key="create_event"):
-            if subject:
-                result = create_event(subject, description)
-                if result:
-                    st.success("Event created successfully!")
-                    st.json(result)
+    st.divider()
+
+    emails_data = st.session_state.get("emails")
+    if emails_data:
+        st.success(f"**{emails_data['count']}** email(s) found")
+        for i, em in enumerate(emails_data["emails"]):
+            intent  = em.get("intent", "")
+            color   = INTENT_COLOR.get(intent, "b-gray")
+            with st.container(border=True):
+                hdr, btn_col = st.columns([5, 1])
+                with hdr:
+                    st.markdown(
+                        f"**{em['subject'] or '(no subject)'}** "
+                        f'<span class="badge {color}">{intent or "Unknown"}</span>',
+                        unsafe_allow_html=True,
+                    )
+                    st.caption(
+                        f"From: {em.get('from_') or '-'} &nbsp;|&nbsp; "
+                        f"Date: {em.get('date') or '-'} &nbsp;|&nbsp; "
+                        f"Attachments: {em.get('attachments', 0)}"
+                    )
+                with btn_col:
+                    if intent == "Event Scheduling":
+                        if st.button("Add", key=f"add_{i}", help="Add to calendar"):
+                            res, err = _post("/api/create-event", {
+                                "user_id":     uid,
+                                "subject":     em["subject"],
+                                "description": em.get("body_preview", ""),
+                            })
+                            st.success("Added!") if not err else st.error(err)
+
+                if em.get("summary"):
+                    st.markdown(f"Note: {em['summary']}")
+                if em.get("suggested_action"):
+                    st.markdown(f"Action: {em['suggested_action']}")
+                with st.expander("Preview"):
+                    st.text(em.get("body_preview") or "-")
+    else:
+        st.info("Click **Fetch & Analyse** to load your emails.")
+
+
+
+# --- CALENDAR ---
+with t_cal:
+    st.header("Calendar")
+    view_col, create_col = st.columns(2)
+
+    with view_col:
+        st.subheader("Today's Events")
+        if st.button("Refresh", key="cal_refresh"):
+            data, err = _get("/api/schedule", user_id=uid)
+            if err:
+                st.error(err)
             else:
-                st.error("Please enter an event subject")
-    
-    with col2:
-        if st.button("🔄 Clear", use_container_width=True, key="clear_form"):
-            st.rerun()
+                st.session_state["schedule"] = data.get("schedule", "")
 
-# Tab 4: Advanced
-with tab4:
-    st.header("Advanced Settings")
-    
-    if not config:
-        st.error("⚠️ Failed to load configuration. Please check if the API is running.")
-    else:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("Custom Assistant Run")
-            custom_query = st.text_area(
-                "Custom Gmail Query",
-                value=config.get("gmail_query", ""),
-                height=100,
+        sched = st.session_state.get("schedule", "")
+        if sched:
+            for line in sched.strip().split("\n"):
+                if line.strip():
+                    st.markdown(line)
+        else:
+            st.info("No events today. Click Refresh.")
+
+    with create_col:
+        st.subheader("Add New Event")
+        with st.form("new_event"):
+            evt_title = st.text_input(
+                "Title", placeholder="e.g., Team Standup"
             )
-            custom_max = st.slider("Custom Max Results", 1, 100, config.get("gmail_max_results", 20))
-            send_whatsapp = st.checkbox("Send WhatsApp Notification", value=True)
-            
-            if st.button("▶️ Run Custom", use_container_width=True):
-                result = run_full_assistant(custom_query, custom_max, send_whatsapp)
-                if result:
-                    st.success("✅ Workflow completed")
-                    st.json(result)
-        
-        with col2:
-            st.subheader("API Information")
-            st.write(f"**API Base URL:** `{API_BASE_URL}`")
-            st.write(f"**Status:** ✅ Running")
-            
-            if st.button("📊 View API Docs", use_container_width=True):
-                st.write(f"Visit [Swagger UI]({API_BASE_URL}/docs)")
-            
-            st.divider()
-            st.subheader("Current Configuration")
-            st.json(config)
+            evt_desc = st.text_area(
+                "Description / when is it?",
+                placeholder="e.g., Daily standup tomorrow at 10 AM",
+                height=100,
+                help="Include a date/time - it will be parsed automatically.",
+            )
+            if st.form_submit_button("Create Event", use_container_width=True, type="primary"):
+                if not evt_title:
+                    st.error("Please enter a title.")
+                else:
+                    res, err = _post("/api/create-event", {
+                        "user_id":     uid,
+                        "subject":     evt_title,
+                        "description": evt_desc,
+                    })
+                    if err:
+                        st.error(err)
+                    else:
+                        st.success(res["message"])
+                        # Refresh schedule
+                        data, _ = _get("/api/schedule", user_id=uid)
+                        if data:
+                            st.session_state["schedule"] = data.get("schedule", "")
+                        st.rerun()
+
+
+# --- PREFERENCES ---
+with t_prefs:
+    st.header("Preferences")
+    st.markdown("Change when and where you receive your daily schedule.")
+
+    current_time = user.get("notify_time", "07:00")
+    h, m = map(int, current_time.split(":"))
+
+    with st.form("prefs"):
+        notify_time = st.time_input(
+            "Daily notification time",
+            value=datetime.time(h, m),
+            help="You will receive an email with today's schedule at this time every day.",
+        )
+        tz = st.selectbox(
+            "Timezone",
+            options=TIMEZONES,
+            index=TIMEZONES.index(user.get("timezone", "UTC"))
+                  if user.get("timezone") in TIMEZONES else 0,
+        )
+        notify_email = st.text_input(
+            "Notification email address",
+            value=user.get("notify_email") or "",
+            placeholder="you@gmail.com",
+        )
+        saved = st.form_submit_button("Save", use_container_width=True, type="primary")
+
+    if saved:
+        nt_str = notify_time.strftime("%H:%M")
+        r = requests.post(
+            f"{API}/preferences",
+            params={
+                "user_id":      uid,
+                "notify_time":  nt_str,
+                "timezone":     tz,
+                "notify_email": notify_email,
+            },
+            timeout=10,
+        )
+        if r.ok:
+            st.success("Preferences saved!")
+            st.session_state["user"]["notify_time"]  = nt_str
+            st.session_state["user"]["timezone"]     = tz
+            st.session_state["user"]["notify_email"] = notify_email
+            st.rerun()
+        else:
+            st.error(f"Failed: {r.text}")
+
