@@ -6,6 +6,11 @@ credentials.json
 users.db
 token.pickle
 *.pickle
+tokens/
+
+# Seen email IDs cache (per-account state, not source code)
+.seen_email_ids.json
+.seen_ids/
 
 # Python cache and virtual environments
 __pycache__/
