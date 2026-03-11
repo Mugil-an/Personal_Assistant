@@ -144,6 +144,10 @@ with st.sidebar:
                 st.session_state.pop(k, None)
             st.rerun()
 
+"""Sidebar with sign-in and status."""
+with st.sidebar:
+    st.title("Personal Assistant")
+    st.divider()
 
 # --- Require login ---
 if not st.session_state.get("user_id"):
