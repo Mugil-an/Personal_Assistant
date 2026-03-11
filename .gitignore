@@ -3,6 +3,7 @@
 
 # Google API credentials and tokens
 credentials.json
+users.db
 token.pickle
 *.pickle
 
