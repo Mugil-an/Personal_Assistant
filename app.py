@@ -46,7 +46,7 @@ class CreateEventRequest(BaseModel):
 @app.get("/")
 def read_root():
     """Health check endpoint."""
-    return {"message": "Personal Assistant API is running", "version": "1.0.0"}
+    return {"message": "Personal Assistant server running", "version": "1.0.0"}
 
 
 @app.get("/api/config")
