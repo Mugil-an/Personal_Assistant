@@ -20,28 +20,31 @@ logger = logging.getLogger(__name__)
 # Max attachment size to download (10 MB)
 _MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
-# File used to persist message IDs that have already been processed
+# File used to persist message IDs that have already been processed (legacy single-user path)
 _SEEN_IDS_FILE = os.path.join(os.path.dirname(__file__), ".seen_email_ids.json")
 
 
-def _load_seen_ids() -> set:
+def _load_seen_ids(path: str | None = None) -> set:
     """Load already-processed Gmail message IDs from disk."""
-    if os.path.exists(_SEEN_IDS_FILE):
+    target = path or _SEEN_IDS_FILE
+    if os.path.exists(target):
         try:
-            with open(_SEEN_IDS_FILE, "r", encoding="utf-8") as fh:
+            with open(target, "r", encoding="utf-8") as fh:
                 return set(json.load(fh))
         except Exception:
             pass
     return set()
 
 
-def _save_seen_ids(seen: set) -> None:
+def _save_seen_ids(seen: set, path: str | None = None) -> None:
     """Persist the set of processed Gmail message IDs to disk."""
+    target = path or _SEEN_IDS_FILE
     try:
-        with open(_SEEN_IDS_FILE, "w", encoding="utf-8") as fh:
+        os.makedirs(os.path.dirname(os.path.abspath(target)), exist_ok=True)
+        with open(target, "w", encoding="utf-8") as fh:
             json.dump(list(seen), fh)
     except Exception as exc:
-        logger.warning("Could not save seen email IDs: %s", exc)
+        logger.warning("Could not save seen email IDs to %s: %s", target, exc)
 
 
 logger = logging.getLogger(__name__)
@@ -180,7 +183,12 @@ def _get_message(service: Any, msg_id: str) -> Dict[str, Any]:
     )
 
 
-def fetch_emails(service, query: str | None = None, max_results: int | None = None) -> List[Dict[str, Any]]:
+def fetch_emails(
+    service,
+    query: str | None = None,
+    max_results: int | None = None,
+    seen_ids_file: str | None = None,
+) -> List[Dict[str, Any]]:
     """Fetch recent emails matching the configured query from Gmail.
 
     Parameters
@@ -189,6 +197,8 @@ def fetch_emails(service, query: str | None = None, max_results: int | None = No
     query: Optional Gmail-style search query string. Defaults to GMAIL_QUERY.
     max_results: Optional maximum number of messages to fetch. Defaults to
         GMAIL_MAX_RESULTS from configuration.
+    seen_ids_file: Optional path for per-account seen-IDs tracking. Defaults
+        to the shared legacy file.
 
     Returns a list of dicts with keys:
         subject, from_, to, date, body, attachments.
@@ -202,7 +212,7 @@ def fetch_emails(service, query: str | None = None, max_results: int | None = No
 
     logger.info("Fetching emails with query='%s' (max %s)", query, max_results)
 
-    seen_ids = _load_seen_ids()
+    seen_ids = _load_seen_ids(seen_ids_file)
     email_data: List[Dict[str, Any]] = []
     page_token = None
 
@@ -274,6 +284,6 @@ def fetch_emails(service, query: str | None = None, max_results: int | None = No
     except Exception as exc:
         logger.error("Error while fetching emails: %s", exc)
 
-    _save_seen_ids(seen_ids)
+    _save_seen_ids(seen_ids, seen_ids_file)
     logger.info("Fetched %d new email(s) matching query", len(email_data))
     return email_data

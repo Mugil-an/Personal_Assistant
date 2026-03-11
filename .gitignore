@@ -12,6 +12,9 @@ tokens/
 .seen_email_ids.json
 .seen_ids/
 
+# Streamlit session file (contains logged-in user ID)
+.user_session.json
+
 # Python cache and virtual environments
 __pycache__/
 *.pyc

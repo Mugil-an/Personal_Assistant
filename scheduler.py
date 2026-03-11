@@ -1,13 +1,16 @@
 """APScheduler jobs for the multi-user Personal Assistant service.
 
 Jobs:
-  - hourly_email_job   : Runs every hour. Fetches emails for all users,
-                         parses with Gemini, creates calendar events.
-  - schedule_notifications : Runs every 10 min. Re-reads DB and ensures each
-                             user has a daily cron job at their chosen time.
+  - hourly_email_job        : Runs every hour. Fetches NEW emails for all users
+                              (primary + linked Gmail accounts), parses body and
+                              PDF attachments with Gemini, creates calendar events
+                              on the exact date Gemini extracted.
+  - schedule_notifications  : Runs every 10 min. Re-reads DB and ensures each
+                              user has a daily cron job at their chosen time.
 """
 
 import logging
+import os
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -18,11 +21,81 @@ from calendar_manager import create_event
 from daily_plan import get_today_schedule
 from email_parser import parse_email_with_gemini
 from gmail_reader import fetch_emails
-from models import Session, User
+from models import Session, User, LinkedAccount
 from notifier import send_whatsapp
 
 logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler(timezone="UTC")
+
+# Directory where per-account seen-IDs files are stored
+_SEEN_IDS_DIR = os.path.join(os.path.dirname(__file__), ".seen_ids")
+
+
+def _seen_ids_file(account_id: str) -> str:
+    """Return a unique seen-IDs file path for an account."""
+    os.makedirs(_SEEN_IDS_DIR, exist_ok=True)
+    safe = "".join(c for c in account_id if c.isalnum() or c in "-_")
+    return os.path.join(_SEEN_IDS_DIR, f"{safe}.json")
+
+
+# ---------------------------------------------------------------------------
+# Core per-account email processing
+# ---------------------------------------------------------------------------
+
+def _process_gmail_account(
+    account_id: str,
+    account_email: str,
+    gmail_token: dict,
+    calendar_service,
+) -> int:
+    """Fetch new emails from one Gmail account and create calendar events.
+
+    Returns the number of calendar events created.
+    """
+    events_created = 0
+    try:
+        gmail, _ = get_user_services(gmail_token)
+    except Exception as exc:
+        logger.error("Auth failed for account %s: %s", account_email, exc)
+        return 0
+
+    try:
+        emails = fetch_emails(gmail, seen_ids_file=_seen_ids_file(account_id))
+    except Exception as exc:
+        logger.error("Failed to fetch emails for %s: %s", account_email, exc)
+        return 0
+
+    if not emails:
+        logger.info("No new emails for %s", account_email)
+        return 0
+
+    for email in emails:
+        subject = email.get("subject", "")
+        body    = email.get("body", "")
+
+        # Collect PDF attachment texts to feed into Gemini
+        pdf_texts = [
+            att["extracted_text"]
+            for att in email.get("attachments", [])
+            if att.get("extracted_text")
+        ]
+
+        parsed = parse_email_with_gemini(body, attachment_texts=pdf_texts or None)
+        if not parsed:
+            continue
+
+        intent = parsed.get("intent", "")
+        dates  = parsed.get("entities", {}).get("dates", [])
+        logger.info("[%s] '%s' → intent=%s dates=%s", account_email, subject, intent, dates)
+
+        if intent == "Event Scheduling":
+            try:
+                create_event(calendar_service, subject, body, date_hints=dates or None)
+                events_created += 1
+            except Exception as exc:
+                logger.error("Failed to create event for '%s' (%s): %s", subject, account_email, exc)
+
+    return events_created
 
 
 # ---------------------------------------------------------------------------
@@ -30,38 +103,35 @@ scheduler = BackgroundScheduler(timezone="UTC")
 # ---------------------------------------------------------------------------
 
 def process_emails_for_user(user: User) -> None:
-    """Fetch emails, parse with Gemini, and create calendar events for one user."""
+    """Fetch emails for a user's primary + all linked Gmail accounts and
+    create calendar events in the user's primary Google Calendar."""
     logger.info("Processing emails for %s", user.email)
+
+    # Build the primary user's calendar service once
     try:
-        gmail, calendar = get_user_services(user.token_json)
-        emails = fetch_emails(gmail)
-
-        if not emails:
-            logger.info("No new emails for %s", user.email)
-            return
-
-        for email in emails:
-            subject = email.get("subject", "")
-            body    = email.get("body", "")
-
-            parsed = parse_email_with_gemini(body)
-            if not parsed:
-                continue
-
-            intent = parsed.get("intent", "")
-            logger.info("[%s] Email '%s' → intent: %s", user.email, subject, intent)
-
-            if intent == "Event Scheduling":
-                try:
-                    create_event(calendar, subject, body)
-                except Exception as exc:
-                    logger.error(
-                        "Failed to create event for '%s' (%s): %s",
-                        subject, user.email, exc,
-                    )
-
+        _, calendar = get_user_services(user.token_json)
     except Exception as exc:
-        logger.error("Error processing emails for %s: %s", user.email, exc)
+        logger.error("Calendar auth failed for %s: %s", user.email, exc)
+        return
+
+    total = 0
+
+    # --- Primary Gmail account ---
+    total += _process_gmail_account(user.id, user.email, user.token_json, calendar)
+
+    # --- Linked Gmail accounts ---
+    db = Session()
+    try:
+        linked_accounts = db.query(LinkedAccount).filter(
+            LinkedAccount.owner_id == user.id
+        ).all()
+    finally:
+        db.close()
+
+    for acct in linked_accounts:
+        total += _process_gmail_account(acct.id, acct.email, acct.token_json, calendar)
+
+    logger.info("Finished processing for %s — %d event(s) created", user.email, total)
 
 
 def notify_user(user: User) -> None:

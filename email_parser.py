@@ -16,18 +16,19 @@ else:
 
 
 GEMINI_PROMPT = """
-Analyze the following email content and extract key information in a structured JSON format.
+Analyze the following email content (and any extracted PDF attachment text below) and extract key information in a structured JSON format.
 
-**Email Content:**
+**Email Body:**
 ---
 {email_body}
 ---
-
+{pdf_section}
 **Instructions:**
-1.  **Identify the primary intent.** If the email discusses a scheduled event, appointment, webinar, or any activity at a specific time, classify the intent as **"Event Scheduling"**. Other intents could be "Information Sharing", "Task Assignment", "Spam", etc.
-2.  **Extract key entities,** such as names of people, organizations, specific dates (including "tomorrow"), and locations.
-3.  **Summarize the email** in one or two sentences.
-4.  **Suggest a concrete next action** (e.g., "Add to calendar," "Reply to sender").
+1.  **Identify the primary intent.** If the email discusses a scheduled event, appointment, deadline, webinar, or any activity at a specific date/time, classify the intent as **"Event Scheduling"**. Other intents could be "Information Sharing", "Task Assignment", "Spam", etc.
+2.  **Extract ALL specific dates and deadlines** mentioned. Return them as full, unambiguous strings (e.g., "April 13 2026", "2026-04-13 14:00"). Do not return vague terms like "tomorrow" or "next week".
+3.  **Extract key entities,** such as names of people, organizations, and locations.
+4.  **Summarize the email** in one or two sentences.
+5.  **Suggest a concrete next action** (e.g., "Add deadline to calendar," "Reply to sender").
 
 **Output Format (JSON only):**
 {{
@@ -45,22 +46,40 @@ Analyze the following email content and extract key information in a structured 
 
 
 def parse_email_with_gemini(
-        email_body : str,
-        prompt:str = GEMINI_PROMPT,
-        model_name : str = GEMINI_MODEL,
-) -> Optional[Dict[str,Any]] | None:
-    
+        email_body: str,
+        attachment_texts: list | None = None,
+        prompt: str = GEMINI_PROMPT,
+        model_name: str = GEMINI_MODEL,
+) -> Optional[Dict[str, Any]] | None:
+    """Parse email body (and optional PDF attachment texts) with Gemini.
+
+    Parameters
+    ----------
+    email_body:
+        Plain-text body of the email.
+    attachment_texts:
+        List of text strings extracted from PDF attachments. Each will be
+        appended to the prompt so Gemini can read deadline/date info from PDFs.
+    """
 
     if not GEMINI_API_KEY:
         logger.error("Cannot parse email: GEMINI_API_KEY is not configured")
         return None
-    if not email_body:
-        logger.warning("Email body is empty,skipping analysis")
+    if not email_body and not attachment_texts:
+        logger.warning("Email body and attachments are empty, skipping analysis")
         return None
-    logger.info("Analyzing email with Gemini model : %s",model_name)
+
+    # Build the optional PDF section injected into the prompt
+    pdf_section = ""
+    if attachment_texts:
+        combined = "\n\n---\n\n".join(t for t in attachment_texts if t)
+        if combined.strip():
+            pdf_section = f"\n**Extracted PDF Attachment Content:**\n---\n{combined[:4000]}\n---\n"
+
+    logger.info("Analyzing email with Gemini model: %s", model_name)
     try:
         model = genai.GenerativeModel(model_name)
-        full_prompt = prompt.format(email_body = email_body)
+        full_prompt = prompt.format(email_body=email_body or "", pdf_section=pdf_section)
 
         generation_config = GenerationConfig(
             temperature=0.1,
@@ -73,5 +92,5 @@ def parse_email_with_gemini(
 
         return json.loads(response.text)
     except Exception as e:
-        logger.error("Error during Gemini API call: %s",e,exc_info=True)
+        logger.error("Error during Gemini API call: %s", e, exc_info=True)
         return None

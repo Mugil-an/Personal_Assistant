@@ -22,16 +22,38 @@ def _normalize_event_time(parsed: datetime | None) -> datetime | None:
     return parsed
 
 
-def create_event(service: Any, subject: str, body: str) -> None:
+def create_event(service: Any, subject: str, body: str, date_hints: list | None = None) -> None:
     """Create a calendar event inferred from an email's subject and body.
 
-    Uses natural-language parsing on the email body to determine the start time
-    and applies a default duration from configuration.
+    Parameters
+    ----------
+    service:
+        Google Calendar service client.
+    subject:
+        Email subject used as the event title.
+    body:
+        Email body, used as fallback for date parsing.
+    date_hints:
+        List of date strings extracted by Gemini (e.g. ["April 13 2026",
+        "2026-04-13 14:00"]). Tried first before falling back to body scan.
     """
 
     settings = {"PREFER_DATES_FROM": "future"}
-    parsed_dt = dateparser.parse(body, settings=settings)
-    dt = _normalize_event_time(parsed_dt)
+    dt = None
+
+    # Try Gemini-supplied date hints first (most accurate)
+    if date_hints:
+        for hint in date_hints:
+            parsed_dt = dateparser.parse(str(hint), settings=settings)
+            dt = _normalize_event_time(parsed_dt)
+            if dt:
+                logger.debug("Used Gemini date hint '%s' for event '%s'", hint, subject)
+                break
+
+    # Fall back to scanning the full email body
+    if not dt:
+        parsed_dt = dateparser.parse(body, settings=settings)
+        dt = _normalize_event_time(parsed_dt)
 
     if not dt:
         logger.info("Could not find a date in email subject='%s'", subject)
