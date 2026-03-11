@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 
 from dateutil import parser as dt_parser
 
-from config import CALENDAR_ID, TIMEZONE
+from app.config import CALENDAR_ID, TIMEZONE
 
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,6 @@ def _parse_event_start(start: Dict[str, Any]) -> datetime | None:
 
     Handles both dateTime and date (all-day) events.
     """
-
     date_time_str = start.get("dateTime") or start.get("date")
     if not date_time_str:
         return None
@@ -67,7 +66,6 @@ def get_today_schedule(service: Any) -> str:
             message += f"⏰ (time unknown) - {summary}\n"
             continue
 
-        # Show only local time HH:MM – for simplicity we display whatever datetime gives us
         time_str = start_dt.strftime("%H:%M")
         message += f"⏰ {time_str} - {summary}\n"
 

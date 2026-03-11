@@ -3,7 +3,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from config import (
+from app.config import (
     NOTIFY_EMAIL_FROM,
     NOTIFY_EMAIL_PASSWORD,
     NOTIFY_EMAIL_TO,

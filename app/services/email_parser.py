@@ -1,9 +1,9 @@
 import logging
 import json
-from typing import Any,Dict,Optional
+from typing import Any, Dict, Optional
 
 import google.generativeai as genai
-from config import GEMINI_API_KEY,GEMINI_MODEL
+from app.config import GEMINI_API_KEY, GEMINI_MODEL
 from google.generativeai.types import GenerationConfig
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,8 @@ else:
 
 
 GEMINI_PROMPT = """
-Analyze the following email content (and any extracted PDF attachment text below) and extract key information in a structured JSON format.
+Analyze the following email content (and any extracted PDF attachment text below)
+and extract key information in a structured JSON format.
 
 **Email Body:**
 ---
@@ -50,7 +51,7 @@ def parse_email_with_gemini(
         attachment_texts: list | None = None,
         prompt: str = GEMINI_PROMPT,
         model_name: str = GEMINI_MODEL,
-) -> Optional[Dict[str, Any]] | None:
+) -> Optional[Dict[str, Any]]:
     """Parse email body (and optional PDF attachment texts) with Gemini.
 
     Parameters

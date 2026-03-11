@@ -11,7 +11,7 @@ API docs available at http://localhost:8000/docs
 
 import logging
 import uvicorn
-from scheduler import start_scheduler
+from app.scheduler import start_scheduler
 
 logging.basicConfig(
     level=logging.INFO,

@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from config import GMAIL_MAX_RESULTS, GMAIL_QUERY
+from app.config import GMAIL_MAX_RESULTS, GMAIL_QUERY
 
 try:
     import pypdf
@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 _MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
 # File used to persist message IDs that have already been processed (legacy single-user path)
-_SEEN_IDS_FILE = os.path.join(os.path.dirname(__file__), ".seen_email_ids.json")
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_SEEN_IDS_FILE = os.path.join(_BASE_DIR, "data", ".seen_email_ids.json")
 
 
 def _load_seen_ids(path: str | None = None) -> set:
@@ -47,15 +48,11 @@ def _save_seen_ids(seen: set, path: str | None = None) -> None:
         logger.warning("Could not save seen email IDs to %s: %s", target, exc)
 
 
-logger = logging.getLogger(__name__)
-
-
 def _decode_body_from_payload(payload: Dict[str, Any]) -> str:
     """Extract and decode the plain-text body from a Gmail payload.
 
     Preference order: text/plain → text/html → first part.
     """
-
     body = ""
     parts = payload.get("parts")
     if not parts:

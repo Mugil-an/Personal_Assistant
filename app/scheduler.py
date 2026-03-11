@@ -16,19 +16,20 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from auth_web import get_user_services
-from calendar_manager import create_event
-from daily_plan import get_today_schedule
-from email_parser import parse_email_with_gemini
-from gmail_reader import fetch_emails
-from models import Session, User, LinkedAccount
-from notifier import send_whatsapp
+from app.auth_web import get_user_services
+from app.services.calendar_manager import create_event
+from app.services.daily_plan import get_today_schedule
+from app.services.email_parser import parse_email_with_gemini
+from app.services.gmail_reader import fetch_emails
+from app.models import Session, User, LinkedAccount
+from app.services.notifier import send_whatsapp
 
 logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler(timezone="UTC")
 
 # Directory where per-account seen-IDs files are stored
-_SEEN_IDS_DIR = os.path.join(os.path.dirname(__file__), ".seen_ids")
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SEEN_IDS_DIR = os.path.join(_BASE_DIR, "data", ".seen_ids")
 
 
 def _seen_ids_file(account_id: str) -> str:
@@ -169,7 +170,6 @@ def hourly_email_job() -> None:
 
 def schedule_notifications() -> None:
     """Re-reads the DB and upserts a daily cron job per user at their chosen time.
-
     Runs every 10 minutes so new users or preference changes take effect quickly.
     """
     db = Session()

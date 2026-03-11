@@ -4,7 +4,7 @@ from typing import Any
 
 import dateparser
 
-from config import CALENDAR_ID, DEFAULT_EVENT_DURATION_MIN, TIMEZONE
+from app.config import CALENDAR_ID, DEFAULT_EVENT_DURATION_MIN, TIMEZONE
 
 
 logger = logging.getLogger(__name__)
@@ -12,13 +12,10 @@ logger = logging.getLogger(__name__)
 
 def _normalize_event_time(parsed: datetime | None) -> datetime | None:
     """Ensure parsed time is a timezone-naive datetime that can be passed to Google.
-
     If parsing fails, returns None.
     """
-
     if parsed is None:
         return None
-    # dateparser already returns a datetime; additional normalization could be added here
     return parsed
 
 

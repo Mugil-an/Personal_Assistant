@@ -8,8 +8,8 @@ load_dotenv()
 
 GOOGLE_CREDENTIALS_FILE: str = os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json")
 GOOGLE_TOKEN_FILE: str = os.getenv("GOOGLE_TOKEN_FILE", "token.pickle")
-GEMINI_API_KEY : str = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", ""))
-GEMINI_MODEL : str = os.getenv("GEMINI_MODEL","gemini_pro")
+GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", ""))
+GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini_pro")
 
 # Gmail search query for meeting-related emails
 GMAIL_QUERY: str = os.getenv(
