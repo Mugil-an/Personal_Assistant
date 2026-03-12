@@ -38,11 +38,12 @@ def get_status(user_id: str = Query(...)):
         if not user:
             raise HTTPException(status_code=404, detail="User not found.")
         return {
-            "email":        user.email,
-            "notify_time":  user.notify_time,
-            "timezone":     user.timezone,
-            "notify_email": user.notify_email,
-            "gmail_query":  user.gmail_query,
+            "email":            user.email,
+            "notify_time":      user.notify_time,
+            "timezone":         user.timezone,
+            "notify_email":     user.notify_email,
+            "gmail_query":      user.gmail_query,
+            "email_sync_hours": user.email_sync_hours or 24,
         }
     finally:
         db.close()

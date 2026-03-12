@@ -1,14 +1,16 @@
 """APScheduler jobs for the multi-user Personal Assistant service.
 
-Jobs:
-  - hourly_email_job        : Runs every hour. Fetches NEW emails for all users
-                              (primary + linked Gmail accounts), parses body and
-                              PDF attachments with Gemini, creates calendar events
-                              on the exact date Gemini extracted.
-  - schedule_notifications  : Runs every 10 min. Re-reads DB and ensures each
-                              user has a daily cron job at their chosen time.
+Jobs (all per-user, managed by schedule_notifications):
+  - sync_emails_<user_id>   : Runs every user.email_sync_hours hours. Fetches
+                              emails in that same window, parses them with Gemini,
+                              and creates calendar events.
+  - notify_<user_id>        : Daily cron at user.notify_time. Sends the user
+                              today's calendar schedule via email.
+  - schedule_notifications  : Runs every 10 min. Re-reads DB and upserts both
+                              per-user jobs above so preference changes apply quickly.
 """
 
+import datetime
 import logging
 import os
 
@@ -48,9 +50,11 @@ def _process_gmail_account(
     account_email: str,
     gmail_token: dict,
     calendar_service,
+    sync_hours: int = 24,
 ) -> int:
     """Fetch new emails from one Gmail account and create calendar events.
 
+    Only emails received within the last ``sync_hours`` hours are fetched.
     Returns the number of calendar events created.
     """
     events_created = 0
@@ -60,8 +64,15 @@ def _process_gmail_account(
         logger.error("Auth failed for account %s: %s", account_email, exc)
         return 0
 
+    after_epoch = int(
+        (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=sync_hours)).timestamp()
+    )
     try:
-        emails = fetch_emails(gmail, seen_ids_file=_seen_ids_file(account_id))
+        emails = fetch_emails(
+            gmail,
+            seen_ids_file=_seen_ids_file(account_id),
+            after_epoch=after_epoch,
+        )
     except Exception as exc:
         logger.error("Failed to fetch emails for %s: %s", account_email, exc)
         return 0
@@ -105,8 +116,14 @@ def _process_gmail_account(
 
 def process_emails_for_user(user: User) -> None:
     """Fetch emails for a user's primary + all linked Gmail accounts and
-    create calendar events in the user's primary Google Calendar."""
-    logger.info("Processing emails for %s", user.email)
+    create calendar events in the user's primary Google Calendar.
+
+    Looks back ``user.email_sync_hours`` hours so each run only processes
+    the slice of mail since the previous sync.
+    """
+    logger.info("Processing emails for %s (window=%sh)", user.email, user.email_sync_hours or 24)
+
+    sync_hours = int(user.email_sync_hours or 24)
 
     # Build the primary user's calendar service once
     try:
@@ -118,7 +135,7 @@ def process_emails_for_user(user: User) -> None:
     total = 0
 
     # --- Primary Gmail account ---
-    total += _process_gmail_account(user.id, user.email, user.token_json, calendar)
+    total += _process_gmail_account(user.id, user.email, user.token_json, calendar, sync_hours)
 
     # --- Linked Gmail accounts ---
     db = Session()
@@ -130,7 +147,7 @@ def process_emails_for_user(user: User) -> None:
         db.close()
 
     for acct in linked_accounts:
-        total += _process_gmail_account(acct.id, acct.email, acct.token_json, calendar)
+        total += _process_gmail_account(acct.id, acct.email, acct.token_json, calendar, sync_hours)
 
     logger.info("Finished processing for %s — %d event(s) created", user.email, total)
 
@@ -154,28 +171,37 @@ def notify_user(user: User) -> None:
 # Scheduled jobs
 # ---------------------------------------------------------------------------
 
-def hourly_email_job() -> None:
-    """Runs every hour — process emails for ALL registered users."""
-    logger.info("=== Hourly email job started ===")
-    db = Session()
-    try:
-        users = db.query(User).all()
-        logger.info("Processing emails for %d user(s)", len(users))
-        for user in users:
-            process_emails_for_user(user)
-    finally:
-        db.close()
-    logger.info("=== Hourly email job complete ===")
-
-
 def schedule_notifications() -> None:
-    """Re-reads the DB and upserts a daily cron job per user at their chosen time.
-    Runs every 10 minutes so new users or preference changes take effect quickly.
+    """Re-reads the DB and upserts two jobs per user:
+
+    1. ``sync_emails_<id>``  — email fetch + calendar update, repeating every
+       ``user.email_sync_hours`` hours.
+    2. ``notify_<id>``       — daily schedule notification at ``user.notify_time``.
+
+    Runs every 10 minutes so preference changes take effect quickly.
     """
     db = Session()
     try:
         users = db.query(User).all()
         for user in users:
+            # ── Per-user email sync job ───────────────────────────────────────
+            sync_hours = int(user.email_sync_hours or 24)
+            try:
+                scheduler.add_job(
+                    process_emails_for_user,
+                    IntervalTrigger(hours=sync_hours),
+                    args=[user],
+                    id=f"sync_emails_{user.id}",
+                    replace_existing=True,
+                )
+                logger.debug(
+                    "Scheduled email sync for %s every %sh",
+                    user.email, sync_hours,
+                )
+            except Exception as exc:
+                logger.error("Failed to schedule email sync for %s: %s", user.email, exc)
+
+            # ── Per-user daily notification job ──────────────────────────────
             if not user.notify_time:
                 continue
             try:
@@ -196,9 +222,7 @@ def schedule_notifications() -> None:
                     user.email, user.notify_time, user.timezone,
                 )
             except Exception as exc:
-                logger.error(
-                    "Failed to schedule notification for %s: %s", user.email, exc
-                )
+                logger.error("Failed to schedule notification for %s: %s", user.email, exc)
     finally:
         db.close()
 
@@ -209,15 +233,7 @@ def schedule_notifications() -> None:
 
 def start_scheduler() -> None:
     """Register all jobs and start the background scheduler."""
-    # Hourly email processing for all users
-    scheduler.add_job(
-        hourly_email_job,
-        IntervalTrigger(hours=1),
-        id="hourly_email_job",
-        replace_existing=True,
-    )
-
-    # Refresh per-user notification schedules every 10 minutes
+    # Refresh per-user jobs every 10 minutes so preference changes apply quickly
     scheduler.add_job(
         schedule_notifications,
         IntervalTrigger(minutes=10),
@@ -226,7 +242,8 @@ def start_scheduler() -> None:
     )
 
     scheduler.start()
-    logger.info("Scheduler started. Jobs: %s", [j.id for j in scheduler.get_jobs()])
+    logger.info("Scheduler started.")
 
-    # Immediately register any existing users' notification jobs
+    # Immediately upsert per-user sync + notification jobs for existing users
     schedule_notifications()
+    logger.info("Active jobs: %s", [j.id for j in scheduler.get_jobs()])

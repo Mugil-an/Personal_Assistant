@@ -1,7 +1,7 @@
 """SQLAlchemy models for multi-user Personal Assistant service."""
 
 import os
-from sqlalchemy import Column, String, JSON, create_engine
+from sqlalchemy import Column, Integer, String, JSON, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 Base = declarative_base()
@@ -17,8 +17,9 @@ class User(Base):
     token_json   = Column(JSON, nullable=False)        # OAuth2 credentials as dict
     notify_time  = Column(String, default="07:00")     # "HH:MM" 24-hour format
     timezone     = Column(String, default="UTC")       # e.g. "Asia/Kolkata"
-    notify_email = Column(String, nullable=True)       # email address to send daily schedule to
-    gmail_query  = Column(String, nullable=True)       # custom Gmail search query
+    notify_email      = Column(String, nullable=True)   # email address to send daily schedule to
+    gmail_query       = Column(String, nullable=True)   # custom Gmail search query
+    email_sync_hours  = Column(Integer, default=24)     # hours to look back when fetching emails
 
     def __repr__(self) -> str:
         return f"<User id={self.id!r} email={self.email!r} notify_time={self.notify_time!r}>"
@@ -55,6 +56,9 @@ with engine.connect() as _conn:
     _cols = [c["name"] for c in inspect(engine).get_columns("users")]
     if "gmail_query" not in _cols:
         _conn.execute(_text("ALTER TABLE users ADD COLUMN gmail_query VARCHAR"))
+        _conn.commit()
+    if "email_sync_hours" not in _cols:
+        _conn.execute(_text("ALTER TABLE users ADD COLUMN email_sync_hours INTEGER DEFAULT 24"))
         _conn.commit()
 
 Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)

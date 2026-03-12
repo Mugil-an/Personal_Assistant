@@ -185,6 +185,7 @@ def fetch_emails(
     query: str | None = None,
     max_results: int | None = None,
     seen_ids_file: str | None = None,
+    after_epoch: int | None = None,
 ) -> List[Dict[str, Any]]:
     """Fetch recent emails matching the configured query from Gmail.
 
@@ -196,6 +197,9 @@ def fetch_emails(
         GMAIL_MAX_RESULTS from configuration.
     seen_ids_file: Optional path for per-account seen-IDs tracking. Defaults
         to the shared legacy file.
+    after_epoch: Optional Unix timestamp (seconds). When provided, only emails
+        received at or after this time are fetched (appended as ``after:<ts>``
+        to the Gmail query).
 
     Returns a list of dicts with keys:
         subject, from_, to, date, body, attachments.
@@ -206,6 +210,10 @@ def fetch_emails(
         query = GMAIL_QUERY
     if max_results is None:
         max_results = GMAIL_MAX_RESULTS
+
+    if after_epoch is not None:
+        time_filter = f"after:{after_epoch}"
+        query = f"{time_filter} {query}" if query else time_filter
 
     logger.info("Fetching emails with query='%s' (max %s)", query, max_results)
 

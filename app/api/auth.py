@@ -217,21 +217,25 @@ def delete_linked_account(account_id: str, user_id: str = Query(...)):
 @router.post("/preferences", summary="Set notification time and email address")
 def set_preferences(
     user_id:      str          = Query(...,     description="Your Google user ID returned after sign-up"),
-    notify_time:  str          = Query("07:00", description="Daily notification time in HH:MM 24h format"),
-    timezone:     str          = Query("UTC",   description="Your timezone, e.g. Asia/Kolkata"),
-    notify_email: str          = Query(...,     description="Email address to receive your daily schedule"),
-    gmail_query:  str | None   = Query(None,    description="Gmail search query used when syncing emails"),
+    notify_time:      str          = Query("07:00", description="Daily notification time in HH:MM 24h format"),
+    timezone:         str          = Query("UTC",   description="Your timezone, e.g. Asia/Kolkata"),
+    notify_email:     str          = Query(...,     description="Email address to receive your daily schedule"),
+    gmail_query:      str | None   = Query(None,    description="Gmail search query used when syncing emails"),
+    email_sync_hours: int          = Query(24,      description="Sync interval in hours: auto-sync runs this often and looks back this far (e.g. 6 = sync every 6h, fetch last 6h of mail)"),
 ):
     """Save the user's notification preferences and email search query."""
+    if email_sync_hours < 1:
+        raise HTTPException(status_code=400, detail="email_sync_hours must be at least 1.")
     db = Session()
     try:
         user = db.get(User, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found. Please sign up first.")
 
-        user.notify_time  = notify_time
-        user.timezone     = timezone
-        user.notify_email = notify_email
+        user.notify_time      = notify_time
+        user.timezone         = timezone
+        user.notify_email     = notify_email
+        user.email_sync_hours = email_sync_hours
         if gmail_query is not None:
             user.gmail_query = gmail_query
         db.commit()
@@ -239,9 +243,10 @@ def set_preferences(
         db.close()
 
     return {
-        "message":      "✅ Preferences saved!",
-        "notify_time":  notify_time,
-        "timezone":     timezone,
-        "notify_email": notify_email,
-        "gmail_query":  gmail_query,
+        "message":          "✅ Preferences saved!",
+        "notify_time":      notify_time,
+        "timezone":         timezone,
+        "notify_email":     notify_email,
+        "gmail_query":      gmail_query,
+        "email_sync_hours": email_sync_hours,
     }

@@ -39,6 +39,8 @@ st.markdown("""
   .pa-page-header {
       display: flex; align-items: center; gap: 0.5rem;
       margin-bottom: 0.25rem;
+      border-left: 4px solid #4285F4;
+      padding-left: 0.6rem;
   }
   .pa-page-title { font-size: 1.55rem; font-weight: 800; margin: 0; }
   .pa-page-sub   { color: #888; font-size: 0.88rem; margin-bottom: 1.5rem; }
@@ -203,7 +205,7 @@ handle_oauth_redirect()
 
 # --- Sidebar ---
 PAGES     = ["Dashboard", "Calendar", "Preferences", "Accounts"]
-PAGE_ICON = {"Dashboard": "📊", "Calendar": "🗓️", "Preferences": "⚙️", "Accounts": "🔗"}
+PAGE_ICON = {"Dashboard": "📊", "Calendar": "�", "Preferences": "🔧", "Accounts": "🔗"}
 
 with st.sidebar:
     st.markdown("## 🤖 Personal Assistant")
@@ -262,7 +264,7 @@ with st.sidebar:
 if not st.session_state.get("user_id"):
     st.markdown(
         "<div style='text-align:center;padding:4rem 1rem'>"
-        "<div style='font-size:2.2rem;font-weight:800;margin-bottom:0.4rem'>🤖 Personal Assistant</div>"
+        "<div style='font-size:2.2rem;font-weight:800;margin-bottom:0.4rem'>� Personal Assistant</div>"
         "<div style='color:#888;font-size:1rem'>Sign in from the sidebar to manage your Gmail, Calendar &amp; daily schedule.</div>"
         "</div>",
         unsafe_allow_html=True,
@@ -305,7 +307,8 @@ if page == "Dashboard":
         finally:
             db.close()
         c1, c2, c3 = st.columns(3)
-        c1.metric("📬 Email Sync",   "Hourly")
+        sync_h = user.get("email_sync_hours") or 24
+        c1.metric("📬 Email Sync",   f"Every {sync_h}h")
         c2.metric("📨 Daily Digest", user["notify_time"])
         c3.metric("📂 Accounts",     1 + linked_count)
 
@@ -364,7 +367,7 @@ if page == "Dashboard":
 # CALENDAR
 # ══════════════════════════════════════════════════════════════════
 elif page == "Calendar":
-    _ph("🗓️", "Calendar", "Your schedule at a glance.")
+    _ph("�", "Calendar", "Your schedule at a glance.")
 
     cal_l, cal_r = st.columns([1, 1], gap="large")
 
@@ -412,7 +415,7 @@ elif page == "Calendar":
 # PREFERENCES
 # ══════════════════════════════════════════════════════════════════
 elif page == "Preferences":
-    _ph("⚙️", "Preferences", "Manage your notification and account settings.")
+    _ph("🔧", "Preferences", "Manage your notification and account settings.")
 
     pref_l, pref_r = st.columns([3, 2], gap="large")
 
@@ -438,6 +441,14 @@ elif page == "Preferences":
                     placeholder="subject:meeting OR subject:appointment",
                     help="Emails matching this query are scanned during each sync.",
                 )
+                email_sync_hours_val = st.number_input(
+                    "Sync interval (hours)",
+                    min_value=1, max_value=720,
+                    value=int(user.get("email_sync_hours") or 24),
+                    step=1,
+                    help="How often the system auto-syncs your emails and updates your calendar. "
+                         "Each run also fetches only emails from within this time window.",
+                )
                 if st.form_submit_button("💾 Save Preferences", use_container_width=True, type="primary"):
                     nt_str = notify_time.strftime("%H:%M")
                     try:
@@ -447,6 +458,7 @@ elif page == "Preferences":
                                 "user_id": uid, "notify_time": nt_str,
                                 "timezone": tz, "notify_email": notify_email,
                                 "gmail_query": gmail_query_val,
+                                "email_sync_hours": int(email_sync_hours_val),
                             },
                             timeout=10,
                         )
@@ -454,6 +466,7 @@ elif page == "Preferences":
                         st.session_state["user"].update({
                             "notify_time": nt_str, "timezone": tz,
                             "notify_email": notify_email, "gmail_query": gmail_query_val,
+                            "email_sync_hours": int(email_sync_hours_val),
                         })
                         st.toast("Settings saved.", icon="✅")
                     except Exception:
@@ -468,6 +481,7 @@ elif page == "Preferences":
             st.markdown(f"**Notify Email:** &nbsp;{notify_val}", unsafe_allow_html=True)
             query_val = user.get("gmail_query") or cfg.get("gmail_query") or "_default_"
             st.markdown(f"**Gmail Query:** &nbsp;`{query_val}`", unsafe_allow_html=True)
+            st.markdown(f"**Sync Interval:** &nbsp;`Every {user.get('email_sync_hours', 24)}h`", unsafe_allow_html=True)
             st.markdown(f"**Account:** &nbsp;{user.get('email', '—')}", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════

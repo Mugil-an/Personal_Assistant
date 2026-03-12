@@ -1,5 +1,6 @@
 """Email-related API routes: run assistant pipeline and fetch/parse emails."""
 
+import datetime as _dt
 import logging
 from typing import Optional
 
@@ -16,7 +17,7 @@ from app.services.notifier import send_whatsapp
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
+    
 
 class RunAssistantRequest(BaseModel):
     user_id:     str
@@ -47,7 +48,9 @@ def run_assistant(req: RunAssistantRequest):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Auth failed: {exc}")
 
-    emails = fetch_emails(gmail, query=req.gmail_query, max_results=req.max_results)
+    sync_hours  = int(user.email_sync_hours or 24)
+    after_epoch = int((_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=sync_hours)).timestamp())
+    emails = fetch_emails(gmail, query=req.gmail_query, max_results=req.max_results, after_epoch=after_epoch)
     events_created = 0
     details = []
 
