@@ -21,9 +21,9 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.auth_web import get_user_services
 from app.services.calendar_manager import create_event
 from app.services.daily_plan import get_today_schedule
-from app.services.email_parser import parse_email_with_gemini
+from app.services.email_parser import enrich_email_analysis, parse_email_with_gemini
 from app.services.gmail_reader import fetch_emails
-from app.models import Session, User, LinkedAccount
+from app.models import Session, User, LinkedAccount, SenderPriority
 from app.services.notifier import send_whatsapp
 
 logger = logging.getLogger(__name__)
@@ -46,11 +46,14 @@ def _seen_ids_file(account_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _process_gmail_account(
+    db,
+    db_obj,
     account_id: str,
     account_email: str,
     gmail_token: dict,
     calendar_service,
     sync_hours: int = 24,
+    sender_priorities: dict | None = None,
 ) -> int:
     """Fetch new emails from one Gmail account and create calendar events.
 
@@ -58,8 +61,9 @@ def _process_gmail_account(
     Returns the number of calendar events created.
     """
     events_created = 0
+    sender_priorities = sender_priorities or {}
     try:
-        gmail, _ = get_user_services(gmail_token)
+        gmail, _ = get_user_services(gmail_token, db=db, db_obj=db_obj)
     except Exception as exc:
         logger.error("Auth failed for account %s: %s", account_email, exc)
         return 0
@@ -83,6 +87,7 @@ def _process_gmail_account(
 
     for email in emails:
         subject = email.get("subject", "")
+        sender  = email.get("from_", "")
         body    = email.get("body", "")
 
         # Collect PDF attachment texts to feed into Gemini
@@ -92,20 +97,63 @@ def _process_gmail_account(
             if att.get("extracted_text")
         ]
 
-        parsed = parse_email_with_gemini(body, attachment_texts=pdf_texts or None)
-        if not parsed:
-            continue
+        parsed = parse_email_with_gemini(
+            body,
+            attachment_texts=pdf_texts or None,
+            email_subject=subject,
+            email_sender=sender,
+        )
+        
+        # Determine user ID for SenderPriority. If linked account, owner_id is the user.
+        user_id = getattr(db_obj, "owner_id", getattr(db_obj, "id", account_id))
+        
+        # Check if this sender already exists in the priority table
+        if sender and sender not in sender_priorities:
+            # Check DB to see if they were added recently
+            existing = db.query(SenderPriority).filter(
+                SenderPriority.user_id == user_id,
+                SenderPriority.sender == sender
+            ).first()
+            if not existing:
+                new_sp = SenderPriority(user_id=user_id, sender=sender, priority="medium")
+                db.add(new_sp)
+                db.commit()
+                # Update our local dictionary so we don't query/insert again in this loop
+                sender_priorities[sender] = "medium"
+            else:
+                sender_priorities[sender] = existing.priority
 
-        intent = parsed.get("intent", "")
-        dates  = parsed.get("entities", {}).get("dates", [])
-        logger.info("[%s] '%s' → intent=%s dates=%s", account_email, subject, intent, dates)
+        sender_prio = sender_priorities.get(sender, "medium")
+        analysis = enrich_email_analysis(body, parsed, subject=subject, sender=sender, sender_priority=sender_prio)
 
-        if intent == "Event Scheduling":
+        intent = analysis.get("intent", "")
+        category = analysis.get("category", "")
+        priority = analysis.get("priority", "Medium")
+        dates  = analysis.get("entities", {}).get("dates", [])
+        logger.info(
+            "[%s] '%s' → category=%s priority=%s intent=%s dates=%s",
+            account_email,
+            subject,
+            category,
+            priority,
+            intent,
+            dates,
+        )
+
+        # Add to calendar only if: Event category OR (Important category AND High/Medium priority)
+        should_create_event = (
+            category == "Event" or 
+            (category == "Important" and priority in ["High", "Medium"])
+        )
+
+        if should_create_event:
             try:
-                create_event(calendar_service, subject, body, date_hints=dates or None)
+                date_hints = analysis.get("entities", {}).get("dates", [])
+                create_event(calendar_service, subject, body, date_hints=date_hints)
                 events_created += 1
-            except Exception as exc:
-                logger.error("Failed to create event for '%s' (%s): %s", subject, account_email, exc)
+                logger.info("Created calendar event for %s", subject)
+            except Exception as e:
+                logger.error("Failed to create event for %s: %s", subject, e)
 
     return events_created
 
@@ -124,32 +172,41 @@ def process_emails_for_user(user: User) -> None:
     logger.info("Processing emails for %s (window=%sh)", user.email, user.email_sync_hours or 24)
 
     sync_hours = int(user.email_sync_hours or 24)
-
-    # Build the primary user's calendar service once
-    try:
-        _, calendar = get_user_services(user.token_json)
-    except Exception as exc:
-        logger.error("Calendar auth failed for %s: %s", user.email, exc)
-        return
-
-    total = 0
-
-    # --- Primary Gmail account ---
-    total += _process_gmail_account(user.id, user.email, user.token_json, calendar, sync_hours)
-
-    # --- Linked Gmail accounts ---
+    
     db = Session()
     try:
+        # Get the latest user object in this session to avoid detached errors
+        user_db = db.get(User, user.id)
+        if not user_db:
+            return
+
+        # Pre-load sender priorities from DB into a dict
+        sp_records = db.query(SenderPriority).filter(SenderPriority.user_id == user_db.id).all()
+        sender_priorities = {sp.sender: sp.priority for sp in sp_records}
+
+        # Build the primary user's calendar service once
+        try:
+            _, calendar = get_user_services(user_db.token_json, db=db, db_obj=user_db)
+        except Exception as exc:
+            logger.error("Calendar auth failed for %s: %s", user_db.email, exc)
+            return
+
+        total = 0
+
+        # --- Primary Gmail account ---
+        total += _process_gmail_account(db, user_db, user_db.id, user_db.email, user_db.token_json, calendar, sync_hours, sender_priorities)
+
+        # --- Linked Gmail accounts ---
         linked_accounts = db.query(LinkedAccount).filter(
-            LinkedAccount.owner_id == user.id
+            LinkedAccount.owner_id == user_db.id
         ).all()
+
+        for acct in linked_accounts:
+            total += _process_gmail_account(db, acct, acct.id, acct.email, acct.token_json, calendar, sync_hours, sender_priorities)
+
+        logger.info("Finished processing for %s — %d event(s) created", user_db.email, total)
     finally:
         db.close()
-
-    for acct in linked_accounts:
-        total += _process_gmail_account(acct.id, acct.email, acct.token_json, calendar, sync_hours)
-
-    logger.info("Finished processing for %s — %d event(s) created", user.email, total)
 
 
 def notify_user(user: User) -> None:
@@ -159,12 +216,18 @@ def notify_user(user: User) -> None:
         logger.warning("No notification email set for %s — skipping notification.", user.email)
         return
 
+    db = Session()
     try:
-        _, calendar = get_user_services(user.token_json)
+        user_db = db.get(User, user.id)
+        if not user_db:
+            return
+        _, calendar = get_user_services(user_db.token_json, db=db, db_obj=user_db)
         schedule = get_today_schedule(calendar)
-        send_whatsapp(schedule, to=user.notify_email)
+        send_whatsapp(schedule, to=user_db.notify_email)
     except Exception as exc:
         logger.error("Error notifying %s: %s", user.email, exc)
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import logging
 import json
+import re
 from typing import Any, Dict, Optional
 
 import google.generativeai as genai
@@ -19,6 +20,9 @@ GEMINI_PROMPT = """
 Analyze the following email content (and any extracted PDF attachment text below)
 and extract key information in a structured JSON format.
 
+**Email Subject:** {email_subject}
+**Email Sender:** {email_sender}
+
 **Email Body:**
 ---
 {email_body}
@@ -30,11 +34,21 @@ and extract key information in a structured JSON format.
 3.  **Extract key entities,** such as names of people, organizations, and locations.
 4.  **Summarize the email** in one or two sentences.
 5.  **Suggest a concrete next action** (e.g., "Add deadline to calendar," "Reply to sender").
+6.  **Assign exactly one email category** from this list only: **"Event"**, **"Promotion"**, **"Personal"**, **"Important"**.
+7.  **Prioritize the email** with one of these values only: **"High"**, **"Medium"**, **"Low"**. Use **"High"** for urgent, deadline-driven, executive, financial, or action-required messages.
+8.  **Detect if this email has an imminent deadline.** Set `has_deadline` to `true` if:
+    - The email mentions a specific deadline, due date, or submission date that is upcoming (within the next 7 days)
+    - The email requires immediate action (apply, submit, register, pay, respond, etc.)
+    - The email contains urgency language (ASAP, urgent, final notice, last chance, etc.)
+    - Set to `false` otherwise.
 
 **Output Format (JSON only):**
 {{
   "intent": "...",
+  "category": "Event|Promotion|Personal|Important",
+  "priority": "High|Medium|Low",
   "summary": "...",
+  "has_deadline": true|false,
   "entities": {{
     "people": ["..."],
     "organizations": ["..."],
@@ -46,9 +60,189 @@ and extract key information in a structured JSON format.
 """
 
 
+EMAIL_CATEGORIES = {"Event", "Promotion", "Personal", "Important"}
+PRIORITY_ORDER = {"Low": 1, "Medium": 2, "High": 3}
+
+PROMOTION_PATTERNS = [
+    r"\bdiscount\b",
+    r"\boffer\b",
+    r"\bsale\b",
+    r"\bpromo\b",
+    r"\bcoupon\b",
+    r"\bdeal\b",
+    r"\bunsubscribe\b",
+    r"\bfree trial\b",
+    r"\bmarketing\b",
+    r"\bnewsletter\b",
+    r"\blimited time\b",
+]
+
+IMPORTANT_PATTERNS = [
+    r"\burgent\b",
+    r"\basap\b",
+    r"\bimmediate\b",
+    r"\baction required\b",
+    r"\bdeadline\b",
+    r"\bdue\b",
+    r"\boverdue\b",
+    r"\bpayment\b",
+    r"\binvoice\b",
+    r"\bsecurity alert\b",
+    r"\bverify\b",
+    r"\bimportant\b",
+]
+
+PERSONAL_PATTERNS = [
+    r"\bfamily\b",
+    r"\bfriend\b",
+    r"\bcatch up\b",
+    r"\bdinner\b",
+    r"\bweekend\b",
+    r"\bbirthday\b",
+    r"\bcall me\b",
+    r"\bhow are you\b",
+]
+
+EVENT_PATTERNS = [
+    r"\bmeeting\b",
+    r"\bappointment\b",
+    r"\bwebinar\b",
+    r"\bcalendar\b",
+    r"\bschedule\b",
+    r"\breschedule\b",
+    r"\bjoin us\b",
+    r"\bconference\b",
+    r"\binterview\b",
+    r"\bstarts at\b",
+]
+
+
+def _text_matches(text: str, patterns: list[str]) -> bool:
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
+
+
+def _normalize_category(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = value.strip().title()
+    return normalized if normalized in EMAIL_CATEGORIES else ""
+
+
+def _normalize_priority(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = value.strip().title()
+    return normalized if normalized in PRIORITY_ORDER else ""
+
+
+def _infer_category(subject: str, sender: str, email_body: str, intent: str) -> str:
+    combined = "\n".join(part for part in [subject, sender, email_body] if part).lower()
+    sender_lower = (sender or "").lower()
+
+    if intent == "Event Scheduling" or _text_matches(combined, EVENT_PATTERNS):
+        return "Event"
+    if _text_matches(combined, IMPORTANT_PATTERNS):
+        return "Important"
+    if _text_matches(combined, PROMOTION_PATTERNS) or any(
+        token in sender_lower for token in ("noreply", "newsletter", "marketing", "offers")
+    ):
+        return "Promotion"
+    if _text_matches(combined, PERSONAL_PATTERNS):
+        return "Personal"
+    return "Important" if intent == "Task Assignment" else "Personal"
+
+
+def _infer_priority(category: str, subject: str, email_body: str, intent: str) -> tuple[str, int]:
+    combined = "\n".join(part for part in [subject, email_body] if part).lower()
+
+    base_score = {
+        "Important": 90,
+        "Event": 75,
+        "Personal": 55,
+        "Promotion": 20,
+    }.get(category, 50)
+
+    if _text_matches(combined, IMPORTANT_PATTERNS):
+        base_score += 15
+    if _text_matches(combined, EVENT_PATTERNS) or intent == "Event Scheduling":
+        base_score += 10
+    if re.search(r"\btoday\b|\btonight\b|\bthis afternoon\b|\bby eod\b", combined, flags=re.IGNORECASE):
+        base_score += 10
+    if _text_matches(combined, PROMOTION_PATTERNS):
+        base_score -= 15
+
+    score = max(0, min(100, base_score))
+    if score >= 80:
+        return "High", score
+    if score >= 45:
+        return "Medium", score
+    return "Low", score
+
+
+def enrich_email_analysis(
+    email_body: str,
+    parsed: Optional[Dict[str, Any]],
+    subject: str = "",
+    sender: str = "",
+    sender_priority: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Return a stable email analysis payload with category and priority.
+    
+    Parameters
+    ----------
+    sender_priority : str, optional
+        User's priority level for this sender ("high", "medium", "low").
+        If "high", the email's priority will be boosted to High.
+    """
+
+    analysis = dict(parsed or {})
+    intent = analysis.get("intent", "")
+
+    category = _normalize_category(analysis.get("category")) or _infer_category(
+        subject=subject,
+        sender=sender,
+        email_body=email_body,
+        intent=intent,
+    )
+    priority, priority_score = _infer_priority(
+        category=category,
+        subject=subject,
+        email_body=email_body,
+        intent=intent,
+    )
+    parsed_priority = _normalize_priority(analysis.get("priority"))
+    if parsed_priority:
+        priority = parsed_priority
+        priority_score = {"Low": 30, "Medium": 60, "High": 90}[priority]
+
+    # Boost priority if sender is marked as high-priority
+    if sender_priority and sender_priority.lower() == "high":
+        priority = "High"
+        priority_score = 95
+        # Optionally boost "Promotion" to "Important" if from high-priority sender
+        if category == "Promotion":
+            category = "Important"
+
+    analysis["category"] = category
+    analysis["priority"] = priority
+    analysis["priority_score"] = priority_score
+    analysis["sender_priority"] = sender_priority or "medium"
+    analysis.setdefault("summary", "")
+    analysis.setdefault("suggested_action", "")
+    analysis.setdefault("has_deadline", False)
+    analysis.setdefault(
+        "entities",
+        {"people": [], "organizations": [], "dates": [], "locations": []},
+    )
+
+    return analysis
+
+
 def parse_email_with_gemini(
         email_body: str,
         attachment_texts: list | None = None,
+    email_subject: str = "",
+    email_sender: str = "",
         prompt: str = GEMINI_PROMPT,
         model_name: str = GEMINI_MODEL,
 ) -> Optional[Dict[str, Any]]:
@@ -80,7 +274,12 @@ def parse_email_with_gemini(
     logger.info("Analyzing email with Gemini model: %s", model_name)
     try:
         model = genai.GenerativeModel(model_name)
-        full_prompt = prompt.format(email_body=email_body or "", pdf_section=pdf_section)
+        full_prompt = prompt.format(
+            email_subject=email_subject or "",
+            email_sender=email_sender or "",
+            email_body=email_body or "",
+            pdf_section=pdf_section,
+        )
 
         generation_config = GenerationConfig(
             temperature=0.1,

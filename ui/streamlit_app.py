@@ -149,6 +149,19 @@ INTENT_COLOR = {
     "Spam":                "b-red",
 }
 
+CATEGORY_COLOR = {
+    "Event": "b-blue",
+    "Promotion": "b-yellow",
+    "Personal": "b-green",
+    "Important": "b-red",
+}
+
+PRIORITY_COLOR = {
+    "High": "b-red",
+    "Medium": "b-yellow",
+    "Low": "b-gray",
+}
+
 # --- API helpers ---
 
 def _get(path, **params):
@@ -204,8 +217,8 @@ restore_session()
 handle_oauth_redirect()
 
 # --- Sidebar ---
-PAGES     = ["Dashboard", "Calendar", "Preferences", "Accounts"]
-PAGE_ICON = {"Dashboard": "📊", "Calendar": "�", "Preferences": "🔧", "Accounts": "🔗"}
+PAGES     = ["Dashboard", "Calendar", "Preferences", "Senders", "Accounts"]
+PAGE_ICON = {"Dashboard": "📊", "Calendar": "📆", "Preferences": "🔧", "Senders": "👥", "Accounts": "🔗"}
 
 with st.sidebar:
     st.markdown("## 🤖 Personal Assistant")
@@ -329,16 +342,30 @@ if page == "Dashboard":
                 n_evt  = res['events_created']
                 if n_evt:
                     st.success(f"Sync complete — {n_evt} new event(s) added to your calendar.")
+                elif n_mail > 0:
+                    st.success(f"Sync complete — {n_mail} email(s) reviewed. Only important/scheduled emails are added to calendar.")
                 else:
-                    st.success(f"Sync complete — {n_mail} email(s) reviewed, nothing new to add.")
+                    st.info(
+                        f"✓ Sync complete. No emails found in your mailbox.\\n\\n"
+                        f"Tip: Use the **Senders** page to prioritize important senders."
+                    )
                 if res.get("details"):
                     with st.expander("View details"):
-                        for item in res["details"]:
+                        details = sorted(
+                            res["details"],
+                            key=lambda item: item.get("priority_score", 0),
+                            reverse=True,
+                        )
+                        for item in details:
                             ico = "🗓️" if item["event_created"] else "📧"
-                            col = INTENT_COLOR.get(item["intent"], "b-gray")
+                            intent_col = INTENT_COLOR.get(item["intent"], "b-gray")
+                            category_col = CATEGORY_COLOR.get(item.get("category"), "b-gray")
+                            priority_col = PRIORITY_COLOR.get(item.get("priority"), "b-gray")
                             st.markdown(
                                 f"{ico} **{item['subject'] or '(no subject)'}** "
-                                f"<span class='badge {col}'>{item['intent'] or '?'}</span>"
+                                f"<span class='badge {priority_col}'>{item.get('priority') or '?'}</span>"
+                                f"<span class='badge {category_col}'>{item.get('category') or '?'}</span>"
+                                f"<span class='badge {intent_col}'>{item['intent'] or '?'}</span>"
                                 f"<br><small style='color:#888'>{item['summary'] or ''}</small>",
                                 unsafe_allow_html=True,
                             )
@@ -483,6 +510,68 @@ elif page == "Preferences":
             st.markdown(f"**Gmail Query:** &nbsp;`{query_val}`", unsafe_allow_html=True)
             st.markdown(f"**Sync Interval:** &nbsp;`Every {user.get('email_sync_hours', 24)}h`", unsafe_allow_html=True)
             st.markdown(f"**Account:** &nbsp;{user.get('email', '—')}", unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════
+# SENDERS
+# ══════════════════════════════════════════════════════════════════
+elif page == "Senders":
+    _ph("👥", "Sender Priorities", "Mark important email senders so you can prioritize them.")
+
+    if st.button("🔄 Refresh Senders", key="senders_refresh"):
+        st.session_state.pop("senders_list", None)
+
+    if "senders_list" not in st.session_state:
+        _senders_data, _err = _get("/api/senders", user_id=uid)
+        if _err:
+            st.error(f"Could not fetch senders: {_err}")
+            st.session_state["senders_list"] = []
+        else:
+            st.session_state["senders_list"] = (_senders_data or {}).get("senders", [])
+
+    senders_list = st.session_state.get("senders_list", [])
+
+    if not senders_list:
+        st.info("No senders found yet. Run a sync to fetch emails and discover senders.")
+    else:
+        with st.container(border=True):
+            st.markdown(f"##### Found {len(senders_list)} Unique Sender(s)")
+            
+            for sender_obj in senders_list:
+                sender_email = sender_obj.get("email", "")
+                current_priority = sender_obj.get("priority", "medium")
+                
+                col1, col2, col3 = st.columns([3, 1, 1])
+                
+                with col1:
+                    st.markdown(f"**{sender_email}**")
+                
+                with col2:
+                    priority_options = ["High", "Medium", "Low"]
+                    current_idx = {"high": 0, "medium": 1, "low": 2}.get(current_priority.lower(), 1)
+                    selected = st.selectbox(
+                        "Priority",
+                        options=priority_options,
+                        index=current_idx,
+                        key=f"priority_{sender_email}",
+                        label_visibility="collapsed",
+                    )
+                
+                with col3:
+                    if st.button("Save", key=f"save_{sender_email}", use_container_width=True):
+                        _update_res, _err = _post(
+                            "/api/sender-priorities",
+                            {
+                                "user_id": uid,
+                                "sender": sender_email,
+                                "priority": selected.lower(),
+                            }
+                        )
+                        if _err:
+                            st.toast(f"Could not update {sender_email}: {_err}", icon="❌")
+                        else:
+                            st.toast(f"✓ {sender_email} set to {selected}", icon="✅")
+                            st.session_state.pop("senders_list", None)
+                            st.rerun()
 
 # ══════════════════════════════════════════════════════════════════
 # ACCOUNTS

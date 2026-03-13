@@ -9,12 +9,13 @@ load_dotenv()
 GOOGLE_CREDENTIALS_FILE: str = os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json")
 GOOGLE_TOKEN_FILE: str = os.getenv("GOOGLE_TOKEN_FILE", "token.pickle")
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", ""))
-GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini_pro")
+GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-# Gmail search query for meeting-related emails
+# Gmail search query: fetch all emails (filter by importance happens in the app)
+# Users can set a custom query in preferences if desired
 GMAIL_QUERY: str = os.getenv(
     "GMAIL_QUERY",
-    "subject:meeting OR subject:appointment OR subject:scheduled",
+    "",  # Empty = fetch all emails in the time window
 )
 
 # Maximum number of Gmail messages to fetch in a single run

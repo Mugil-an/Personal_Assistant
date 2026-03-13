@@ -35,13 +35,17 @@ def create_auth_flow(redirect_uri: str, state: str = None) -> Flow:
     )
 
 
-def get_user_services(token_json: dict) -> Tuple[object, object]:
+def get_user_services(token_json: dict, db=None, db_obj=None) -> Tuple[object, object]:
     """Rebuild Gmail and Calendar service clients from a stored token dict.
 
     Parameters
     ----------
     token_json:
-        The dict previously saved as User.token_json in the database.
+        The dict previously saved as User.token_json or LinkedAccount.token_json in the database.
+    db:
+        Optional SQLAlchemy session to use for saving the refreshed token.
+    db_obj:
+        Optional User or LinkedAccount object to update if the token is refreshed.
 
     Returns
     -------
@@ -54,7 +58,14 @@ def get_user_services(token_json: dict) -> Tuple[object, object]:
         from google.auth.transport.requests import Request
         creds.refresh(Request())
         logger.info("Refreshed OAuth token for stored credentials.")
+        
+        # Save the new token back to the database if references are provided
+        if db is not None and db_obj is not None:
+            import json
+            db_obj.token_json = json.loads(creds.to_json())
+            db.commit()
+            logger.info("Saved refreshed token back to database.")
 
-    gmail    = build("gmail",    "v1", credentials=creds)
-    calendar = build("calendar", "v3", credentials=creds)
+    gmail    = build("gmail",    "v1", credentials=creds, cache_discovery=False)
+    calendar = build("calendar", "v3", credentials=creds, cache_discovery=False)
     return gmail, calendar

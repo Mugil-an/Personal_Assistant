@@ -19,22 +19,19 @@ def _normalize_event_time(parsed: datetime | None) -> datetime | None:
     return parsed
 
 
-def create_event(service: Any, subject: str, body: str, date_hints: list | None = None) -> None:
+def create_event(service: Any, summary: str, description: str, location: str | None = None, date_hints: list | None = None) -> bool:
     """Create a calendar event inferred from an email's subject and body.
 
-    Parameters
-    ----------
-    service:
-        Google Calendar service client.
-    subject:
-        Email subject used as the event title.
-    body:
-        Email body, used as fallback for date parsing.
-    date_hints:
-        List of date strings extracted by Gemini (e.g. ["April 13 2026",
-        "2026-04-13 14:00"]). Tried first before falling back to body scan.
+    Args:
+        service: Google Calendar service client.
+        summary: Event title.
+        description: Event description.
+        location: Event location.
+        date_hints: List of date strings extracted by Gemini.
+    
+    Returns:
+        True if the event was created, False otherwise.
     """
-
     settings = {"PREFER_DATES_FROM": "future"}
     dt = None
 
@@ -44,24 +41,25 @@ def create_event(service: Any, subject: str, body: str, date_hints: list | None 
             parsed_dt = dateparser.parse(str(hint), settings=settings)
             dt = _normalize_event_time(parsed_dt)
             if dt:
-                logger.debug("Used Gemini date hint '%s' for event '%s'", hint, subject)
+                logger.debug("Used Gemini date hint '%s' for event '%s'", hint, summary)
                 break
 
     # Fall back to scanning the full email body
     if not dt:
-        parsed_dt = dateparser.parse(body, settings=settings)
+        parsed_dt = dateparser.parse(description, settings=settings)
         dt = _normalize_event_time(parsed_dt)
 
     if not dt:
-        logger.info("Could not find a date in email subject='%s'", subject)
-        return
+        logger.info("Could not find a date in email summary='%s'", summary)
+        return False
 
     # Apply default duration
     end_dt = dt + timedelta(minutes=DEFAULT_EVENT_DURATION_MIN)
 
     event = {
-        "summary": subject or "(No subject)",
-        "description": body[:500],  # Keep only first 500 chars
+        "summary": summary or "(No title)",
+        "location": location,
+        "description": description[:500],  # Keep only first 500 chars
         "start": {
             "dateTime": dt.isoformat(),
             "timeZone": TIMEZONE,
@@ -80,5 +78,7 @@ def create_event(service: Any, subject: str, body: str, date_hints: list | None 
             created.get("summary"),
             created.get("start", {}).get("dateTime"),
         )
+        return True
     except Exception as exc:
-        logger.error("Failed to create calendar event for '%s': %s", subject, exc)
+        logger.error("Failed to create calendar event for '%s': %s", summary, exc)
+        return False

@@ -18,8 +18,9 @@ class User(Base):
     notify_time  = Column(String, default="07:00")     # "HH:MM" 24-hour format
     timezone     = Column(String, default="UTC")       # e.g. "Asia/Kolkata"
     notify_email      = Column(String, nullable=True)   # email address to send daily schedule to
-    gmail_query       = Column(String, nullable=True)   # custom Gmail search query
+    gmail_query       = Column(String, nullable=True)   # custom Gmail search query (deprecated: now fetch all)
     email_sync_hours  = Column(Integer, default=24)     # hours to look back when fetching emails
+    sender_priorities = Column(JSON, default={})        # {"sender@example.com": "high"|"medium"|"low"}
 
     def __repr__(self) -> str:
         return f"<User id={self.id!r} email={self.email!r} notify_time={self.notify_time!r}>"
@@ -39,6 +40,20 @@ class LinkedAccount(Base):
         return f"<LinkedAccount id={self.id!r} email={self.email!r} owner={self.owner_id!r}>"
 
 
+class SenderPriority(Base):
+    """Maps a user to a specific sender and priority."""
+
+    __tablename__ = "sender_priorities"
+
+    id       = Column(Integer, primary_key=True, autoincrement=True)
+    user_id  = Column(String, nullable=False)    # References users.id
+    sender   = Column(String, nullable=False)
+    priority = Column(String, default="medium")  # "high", "medium", "low"
+
+    def __repr__(self) -> str:
+        return f"<SenderPriority user_id={self.user_id!r} sender={self.sender!r} priority={self.priority!r}>"
+
+
 # SQLite database stored in data/ at the project root
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DATA_DIR = os.path.join(_BASE_DIR, "data")
@@ -50,7 +65,7 @@ engine = create_engine(
 )
 Base.metadata.create_all(engine)
 
-# Lightweight migration: add gmail_query column if upgrading from an older schema
+# Lightweight migration: add columns/tables if upgrading from an older schema
 from sqlalchemy import inspect, text as _text
 with engine.connect() as _conn:
     _cols = [c["name"] for c in inspect(engine).get_columns("users")]
@@ -60,5 +75,54 @@ with engine.connect() as _conn:
     if "email_sync_hours" not in _cols:
         _conn.execute(_text("ALTER TABLE users ADD COLUMN email_sync_hours INTEGER DEFAULT 24"))
         _conn.commit()
+    if "sender_priorities" not in _cols:
+        _conn.execute(_text("ALTER TABLE users ADD COLUMN sender_priorities JSON DEFAULT '{}'"))
+        _conn.commit()
+
+    # Create the sender_priorities table if it doesn't exist
+    if not inspect(engine).has_table("sender_priorities"):
+        SenderPriority.__table__.create(engine)
 
 Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+# Perform data migration from users.sender_priorities JSON to sender_priorities table
+# This runs once on startup and safely converts legacy data into the new table.
+import json
+db = Session()
+try:
+    users_with_json = db.execute(_text("SELECT id, sender_priorities FROM users WHERE sender_priorities IS NOT NULL AND sender_priorities != '{}'")).mappings().all()
+    if users_with_json:
+        for user_row in users_with_json:
+            user_id = user_row["id"]
+            priorities_json = user_row["sender_priorities"]
+            
+            # Determine if it is a string or already parsed JSON 
+            if isinstance(priorities_json, str):
+                try:
+                    priorities = json.loads(priorities_json)
+                except json.JSONDecodeError:
+                    continue
+            else:
+                priorities = priorities_json
+                
+            if isinstance(priorities, dict) and priorities:
+                for sender, priority in priorities.items():
+                    # Check if priority already migrated
+                    exists = db.query(SenderPriority).filter(
+                        SenderPriority.user_id == user_id,
+                        SenderPriority.sender == sender
+                    ).first()
+                    
+                    if not exists:
+                        new_record = SenderPriority(user_id=user_id, sender=sender, priority=priority)
+                        db.add(new_record)
+                
+                # Clear out the JSON to avoid re-migrating
+                db.execute(_text("UPDATE users SET sender_priorities = '{}' WHERE id = :uid"), {"uid": user_id})
+        
+        db.commit()
+except Exception as e:
+    import logging
+    logging.getLogger(__name__).error(f"Failed to migrate sender priorities: {e}")
+finally:
+    db.close()
