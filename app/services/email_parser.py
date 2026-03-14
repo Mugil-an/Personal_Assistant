@@ -1,6 +1,8 @@
 import logging
 import json
 import re
+import threading
+import time
 from typing import Any, Dict, Optional
 
 import google.generativeai as genai
@@ -8,6 +10,25 @@ from app.config import GEMINI_API_KEY, GEMINI_MODEL
 from google.generativeai.types import GenerationConfig
 
 logger = logging.getLogger(__name__)
+
+_quota_guard_lock = threading.Lock()
+_quota_block_until_monotonic = 0.0
+
+
+def _extract_retry_delay_seconds(error_text: str) -> int:
+    """Extract retry delay from Gemini error text when available."""
+    match = re.search(r"retry in\s+([0-9]+(?:\.[0-9]+)?)s", error_text, flags=re.IGNORECASE)
+    if not match:
+        return 0
+    try:
+        return int(float(match.group(1)))
+    except (ValueError, TypeError):
+        return 0
+
+
+def _is_quota_exhausted_error(error_text: str) -> bool:
+    text = (error_text or "").lower()
+    return "resourceexhausted" in text or "quota exceeded" in text or "429" in text
 
 
 if GEMINI_API_KEY:
@@ -257,11 +278,23 @@ def parse_email_with_gemini(
         appended to the prompt so Gemini can read deadline/date info from PDFs.
     """
 
+    global _quota_block_until_monotonic
+
     if not GEMINI_API_KEY:
         logger.error("Cannot parse email: GEMINI_API_KEY is not configured")
         return None
     if not email_body and not attachment_texts:
         logger.warning("Email body and attachments are empty, skipping analysis")
+        return None
+
+    # Avoid hammering Gemini after quota/rate-limit failures.
+    now_monotonic = time.monotonic()
+    if now_monotonic < _quota_block_until_monotonic:
+        remaining = int(_quota_block_until_monotonic - now_monotonic)
+        logger.warning(
+            "Skipping Gemini call due to active quota cooldown (%ss remaining)",
+            max(0, remaining),
+        )
         return None
 
     # Build the optional PDF section injected into the prompt
@@ -292,5 +325,26 @@ def parse_email_with_gemini(
 
         return json.loads(response.text)
     except Exception as e:
+        error_text = str(e)
+        if _is_quota_exhausted_error(error_text):
+            retry_delay = _extract_retry_delay_seconds(error_text)
+
+            # If quota appears daily-limited, avoid retry storms for this run.
+            daily_metric_hit = "perday" in error_text.lower() or "free_tier_requests" in error_text.lower()
+            cooldown_seconds = max(retry_delay, 3600 if daily_metric_hit else 30)
+
+            with _quota_guard_lock:
+                _quota_block_until_monotonic = max(
+                    _quota_block_until_monotonic,
+                    time.monotonic() + cooldown_seconds,
+                )
+
+            logger.warning(
+                "Gemini quota/rate limit hit. Entering cooldown for %ss. Error: %s",
+                cooldown_seconds,
+                error_text,
+            )
+            return None
+
         logger.error("Error during Gemini API call: %s", e, exc_info=True)
         return None

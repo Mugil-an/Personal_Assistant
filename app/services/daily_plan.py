@@ -1,6 +1,8 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+import re
 
 from dateutil import parser as dt_parser
 
@@ -8,6 +10,38 @@ from app.config import CALENDAR_ID, TIMEZONE
 
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_text(value: str) -> str:
+    """Lowercase text and keep only alphanumeric tokens for loose matching."""
+    return " ".join(re.findall(r"[a-z0-9]+", (value or "").lower()))
+
+
+def _is_similar_summary(a: str, b: str) -> bool:
+    """Return True when two summaries are likely about the same event."""
+    na = _normalize_text(a)
+    nb = _normalize_text(b)
+    if not na or not nb:
+        return False
+    if na == nb or na in nb or nb in na:
+        return True
+
+    tokens_a = set(na.split())
+    tokens_b = set(nb.split())
+    if not tokens_a or not tokens_b:
+        return False
+
+    overlap = len(tokens_a & tokens_b) / min(len(tokens_a), len(tokens_b))
+    return overlap >= 0.6
+
+
+def _resolve_timezone() -> Any:
+    """Return the configured timezone; fallback to UTC if invalid."""
+    try:
+        return ZoneInfo(TIMEZONE)
+    except ZoneInfoNotFoundError:
+        logger.warning("Invalid TIMEZONE '%s'; defaulting to UTC", TIMEZONE)
+        return timezone.utc
 
 
 def _parse_event_start(start: Dict[str, Any]) -> datetime | None:
@@ -29,19 +63,21 @@ def _parse_event_start(start: Dict[str, Any]) -> datetime | None:
 def get_today_schedule(service: Any) -> str:
     """Return a human-friendly summary of today's calendar events."""
 
-    # Define the start and end of "Today" in UTC
-    now_utc = datetime.now(timezone.utc)
-    end_of_day_utc = (now_utc + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    tzinfo = _resolve_timezone()
+    now_local = datetime.now(tzinfo)
+    start_of_day_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_of_day_local = start_of_day_local + timedelta(days=1)
 
-    now = now_utc.isoformat()
-    end_of_day = end_of_day_utc.isoformat()
+    # Query Google Calendar in UTC boundaries for the user's full local day.
+    start_of_day = start_of_day_local.astimezone(timezone.utc).isoformat()
+    end_of_day = end_of_day_local.astimezone(timezone.utc).isoformat()
 
     try:
         events_result = (
             service.events()
             .list(
                 calendarId=CALENDAR_ID,
-                timeMin=now,
+                timeMin=start_of_day,
                 timeMax=end_of_day,
                 singleEvents=True,
                 orderBy="startTime",
@@ -50,23 +86,45 @@ def get_today_schedule(service: Any) -> str:
         )
     except Exception as exc:
         logger.error("Failed to fetch today's schedule from calendar: %s", exc)
-        return "⚠️ Could not fetch today's schedule due to an error."
+        return "■ Could not fetch today's schedule due to an error."
 
     events: List[Dict[str, Any]] = events_result.get("items", [])
 
     if not events:
-        return "☕ No meetings scheduled for today. Enjoy your day!"
+        return "🗓️ No meetings scheduled for today. Enjoy your day!"
 
-    message = "🚀 *Your Daily Schedule:*\n\n"
+    message = "📅 *Your Daily Schedule:*\n\n"
+    seen_signatures: list[tuple[str, str]] = []
     for event in events:
-        start_dt = _parse_event_start(event.get("start", {}))
+        start_obj = event.get("start", {})
+        start_dt = _parse_event_start(start_obj)
         summary = event.get("summary") or "(No title)"
 
-        if not start_dt:
-            message += f"⏰ (time unknown) - {summary}\n"
+        if start_obj.get("date") and not start_obj.get("dateTime"):
+            duplicate = any(sig_time == "all-day" and _is_similar_summary(summary, sig_summary) for sig_time, sig_summary in seen_signatures)
+            if duplicate:
+                continue
+            seen_signatures.append(("all-day", summary))
+            message += f"- All day - {summary}\n"
             continue
 
-        time_str = start_dt.strftime("%H:%M")
-        message += f"⏰ {time_str} - {summary}\n"
+        if not start_dt:
+            duplicate = any(sig_time == "unknown" and _is_similar_summary(summary, sig_summary) for sig_time, sig_summary in seen_signatures)
+            if duplicate:
+                continue
+            seen_signatures.append(("unknown", summary))
+            message += f"- (time unknown) - {summary}\n"
+            continue
+
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=timezone.utc)
+        time_str = start_dt.astimezone(tzinfo).strftime("%H:%M")
+
+        duplicate = any(sig_time == time_str and _is_similar_summary(summary, sig_summary) for sig_time, sig_summary in seen_signatures)
+        if duplicate:
+            continue
+        seen_signatures.append((time_str, summary))
+
+        message += f"- {time_str} - {summary}\n"
 
     return message

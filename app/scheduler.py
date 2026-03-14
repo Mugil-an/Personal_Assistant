@@ -13,6 +13,7 @@ Jobs (all per-user, managed by schedule_notifications):
 import datetime
 import logging
 import os
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -32,6 +33,17 @@ scheduler = BackgroundScheduler(timezone="UTC")
 # Directory where per-account seen-IDs files are stored
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SEEN_IDS_DIR = os.path.join(_BASE_DIR, "data", ".seen_ids")
+
+
+def _valid_timezone_name(value: str | None) -> str:
+    """Return a valid IANA timezone name, falling back to UTC."""
+    tz_name = value or "UTC"
+    try:
+        ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        logger.warning("Invalid user timezone '%s'; falling back to UTC", value)
+        return "UTC"
+    return tz_name
 
 
 def _seen_ids_file(account_id: str) -> str:
@@ -274,7 +286,7 @@ def schedule_notifications() -> None:
                     CronTrigger(
                         hour=int(hour),
                         minute=int(minute),
-                        timezone=user.timezone or "UTC",
+                        timezone=_valid_timezone_name(user.timezone),
                     ),
                     args=[user],
                     id=f"notify_{user.id}",

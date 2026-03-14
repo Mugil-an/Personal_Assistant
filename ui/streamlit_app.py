@@ -338,8 +338,8 @@ if page == "Dashboard":
             if err:
                 st.error("Something went wrong. Please try again.")
             else:
-                n_mail = res['emails_processed']
-                n_evt  = res['events_created']
+                n_mail = int(res.get("emails_processed", len(res.get("details", []))))
+                n_evt  = int(res.get("events_created", 0))
                 if n_evt:
                     st.success(f"Sync complete — {n_evt} new event(s) added to your calendar.")
                 elif n_mail > 0:
