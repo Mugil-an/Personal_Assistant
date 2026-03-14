@@ -201,6 +201,35 @@ scheduler.start()
 
 ---
 
+## Docker Deployment
+
+### Prerequisites
+- Install Docker Desktop
+- Ensure `.env` exists with your runtime values
+- Ensure `credentials.json` exists at the project root
+
+### Build and Run
+```bash
+docker compose up --build -d
+```
+
+### Access
+- API: http://localhost:8000
+- API Docs: http://localhost:8000/docs
+- Streamlit UI: http://localhost:8501
+
+### Stop
+```bash
+docker compose down
+```
+
+### Notes
+- SQLite data is persisted through `./data:/app/data`.
+- Token/session artifacts are persisted through `./tokens:/app/tokens`.
+- Streamlit calls the API using `API_BASE_URL` (set to `http://api:8000` inside compose).
+
+---
+
 ## 📞 Support
 
 For issues:

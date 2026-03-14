@@ -449,7 +449,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- Constants ---
-API = "http://localhost:8000"
+API = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 # --- Server-side session file (replaces browser cookies — no JS timing issues) ---
 _SESSION_FILE = os.path.join(os.path.dirname(__file__), ".user_session.json")
