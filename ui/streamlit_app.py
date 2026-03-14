@@ -24,83 +24,427 @@ st.set_page_config(
 # --- Global styles ---
 st.markdown("""
 <style>
-  /* ── Layout ─────────────────────────────────────────────── */
-  .block-container { padding: 4rem 2.5rem 1rem !important; }
+  :root {
+                        --pa-bg: var(--background-color);
+                        --pa-panel: var(--secondary-background-color);
+                        --pa-panel-alt: color-mix(in srgb, var(--secondary-background-color) 85%, var(--background-color));
+                        --pa-text: var(--text-color);
+                        --pa-muted: color-mix(in srgb, var(--text-color) 56%, transparent);
+                        --pa-line: color-mix(in srgb, var(--text-color) 16%, transparent);
+            --pa-brand: #1e7bff;
+            --pa-brand-2: #0da3c8;
+            --pa-brand-dark: #145fca;
+            --pa-success: #16a34a;
+            --pa-warning: #f97316;
+            --pa-danger: #dc2626;
+                        --pa-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+                        --pa-sidebar: linear-gradient(180deg, color-mix(in srgb, var(--secondary-background-color) 92%, var(--background-color)) 0%, var(--secondary-background-color) 100%);
+                        --pa-hero: linear-gradient(145deg, color-mix(in srgb, var(--secondary-background-color) 80%, var(--background-color)) 0%, var(--secondary-background-color) 100%);
+  }
 
-  /* ── Metrics ─────────────────────────────────────────────── */
-  [data-testid="stMetric"] {
-      background: var(--secondary-background-color);
+  [data-testid="stAppViewContainer"] {
+      background:
+        radial-gradient(circle at 12% -8%, rgba(13, 163, 200, 0.14), transparent 36%),
+        radial-gradient(circle at 88% 0%, rgba(15, 95, 214, 0.14), transparent 42%),
+        var(--pa-bg);
+  }
+
+  [data-testid="stSidebar"] {
+      border-right: 1px solid var(--pa-line);
+      background: var(--pa-sidebar);
+  }
+
+  [data-testid="stSidebar"] * {
+      color: var(--pa-text) !important;
+  }
+
+  [data-testid="stSidebar"] .stButton > button {
+      width: 100%;
+      text-align: left;
+      justify-content: flex-start;
       border-radius: 10px;
-      padding: 1rem 1.25rem;
-      border: 1px solid rgba(128,128,128,0.18);
+      border: 1px solid var(--pa-line);
+      background: color-mix(in srgb, var(--pa-panel) 78%, transparent);
+      color: var(--pa-text) !important;
+      box-shadow: none;
+      padding: 0.52rem 0.7rem;
   }
 
-  /* ── Page header ─────────────────────────────────────────── */
+  [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+      background: linear-gradient(145deg, var(--pa-brand) 0%, var(--pa-brand-dark) 100%) !important;
+      border-color: var(--pa-brand-dark) !important;
+      color: #ffffff !important;
+      box-shadow: 0 8px 18px rgba(30, 123, 255, 0.22);
+  }
+
+  [data-testid="stSidebar"] .stButton > button[kind="secondary"] {
+      background: color-mix(in srgb, var(--pa-panel) 84%, transparent) !important;
+      border-color: var(--pa-line) !important;
+      color: var(--pa-text) !important;
+  }
+
+  [data-testid="stSidebar"] .stButton > button:hover {
+      transform: translateY(0);
+      border-color: color-mix(in srgb, var(--pa-brand) 45%, var(--pa-line));
+      box-shadow: 0 6px 14px rgba(30, 123, 255, 0.14);
+  }
+
+  .block-container {
+      max-width: 1200px;
+      padding: 2.3rem 2.1rem 1.4rem !important;
+  }
+
+  h1, h2, h3, h4, h5, h6, p, label, span, div {
+      color: var(--pa-text);
+  }
+
+  [data-testid="stAppViewContainer"] p,
+  [data-testid="stAppViewContainer"] li,
+  [data-testid="stAppViewContainer"] small {
+      color: var(--pa-text);
+  }
+
+  [data-testid="stVerticalBlock"] > div {
+      animation: paRise 0.42s ease both;
+  }
+
+  [data-testid="stVerticalBlock"] > div:nth-child(1) { animation-delay: 0.02s; }
+  [data-testid="stVerticalBlock"] > div:nth-child(2) { animation-delay: 0.08s; }
+  [data-testid="stVerticalBlock"] > div:nth-child(3) { animation-delay: 0.14s; }
+  [data-testid="stVerticalBlock"] > div:nth-child(4) { animation-delay: 0.20s; }
+  [data-testid="stVerticalBlock"] > div:nth-child(5) { animation-delay: 0.26s; }
+
+  @keyframes paRise {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+  }
+
+  [data-testid="stMetric"] {
+      background: linear-gradient(180deg, var(--pa-panel) 0%, var(--pa-panel-alt) 100%);
+      border-radius: 14px;
+      padding: 1rem 1.1rem;
+      border: 1px solid var(--pa-line);
+      box-shadow: var(--pa-shadow);
+  }
+
+  [data-testid="stMetricValue"] {
+      font-size: 1.35rem;
+      color: var(--pa-text);
+  }
+
+  [data-testid="stMetricLabel"] {
+      color: var(--pa-muted);
+      font-weight: 600;
+  }
+
+  div[data-testid="stForm"],
+  div[data-testid="stContainer"] {
+      border-radius: 14px;
+  }
+
+  .stButton > button,
+  .stDownloadButton > button,
+  [data-testid="baseButton-primary"],
+  [data-testid="baseButton-secondary"] {
+      border-radius: 10px;
+      border: 1px solid rgba(30, 123, 255, 0.28);
+      transition: all 0.18s ease;
+      font-weight: 600;
+  }
+
+  button[kind="primary"] {
+      background: var(--pa-brand) !important;
+      border-color: var(--pa-brand-dark) !important;
+      color: #ffffff !important;
+  }
+
+    .stForm .stFormSubmitButton > button[kind="primary"],
+    .stFormSubmitButton > button[kind="primary"],
+    div[data-testid="stFormSubmitButton"] > button,
+    div[data-testid="stFormSubmitButton"] button,
+    div[data-testid="stForm"] div[data-testid="stFormSubmitButton"] > button,
+    div[data-testid="stForm"] div[data-testid="stFormSubmitButton"] button {
+      background: var(--pa-brand) !important;
+      border-color: var(--pa-brand-dark) !important;
+      color: #ffffff !important;
+      box-shadow: 0 8px 18px rgba(30, 123, 255, 0.2);
+  }
+
+  button[kind="primary"]:hover {
+      background: var(--pa-brand-dark) !important;
+  }
+
+    .stForm .stFormSubmitButton > button[kind="primary"]:hover,
+    .stFormSubmitButton > button[kind="primary"]:hover,
+    div[data-testid="stFormSubmitButton"] > button:hover,
+    div[data-testid="stFormSubmitButton"] button:hover,
+    div[data-testid="stForm"] div[data-testid="stFormSubmitButton"] > button:hover,
+    div[data-testid="stForm"] div[data-testid="stFormSubmitButton"] button:hover {
+      background: var(--pa-brand-dark) !important;
+      border-color: var(--pa-brand-dark) !important;
+  }
+
+  .stButton > button:hover,
+  .stDownloadButton > button:hover,
+  [data-testid="baseButton-primary"]:hover,
+  [data-testid="baseButton-secondary"]:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 18px rgba(30, 123, 255, 0.2);
+      border-color: rgba(30, 123, 255, 0.4);
+  }
+
   .pa-page-header {
-      display: flex; align-items: center; gap: 0.5rem;
+      padding: 1rem 1.05rem;
+      border-radius: 14px;
+      border: 1px solid var(--pa-line);
+      box-shadow: var(--pa-shadow);
+    background: linear-gradient(115deg, var(--pa-panel) 0%, var(--pa-panel-alt) 100%);
       margin-bottom: 0.25rem;
-      border-left: 4px solid #4285F4;
-      padding-left: 0.6rem;
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
   }
-  .pa-page-title { font-size: 1.55rem; font-weight: 800; margin: 0; }
-  .pa-page-sub   { color: #888; font-size: 0.88rem; margin-bottom: 1.5rem; }
 
-  /* ── Sidebar user card ───────────────────────────────────── */
+  .pa-page-title {
+      font-size: 1.5rem;
+      font-weight: 800;
+      margin: 0;
+      letter-spacing: 0.2px;
+  }
+
+  .pa-page-sub {
+      color: var(--pa-muted);
+      font-size: 0.9rem;
+      margin: 0.35rem 0 1.3rem;
+      padding-left: 0.2rem;
+  }
+
+  .pa-auth-hero {
+      text-align: center;
+      padding: 4.2rem 1rem;
+      border: 1px solid var(--pa-line);
+      border-radius: 16px;
+      box-shadow: var(--pa-shadow);
+    background: var(--pa-hero);
+      max-width: 780px;
+      margin: 2rem auto 0;
+  }
+
+  .pa-auth-title {
+      font-size: 2.2rem;
+      font-weight: 850;
+      margin-bottom: 0.55rem;
+    color: var(--pa-text);
+      letter-spacing: 0.2px;
+  }
+
+  .pa-auth-sub {
+      color: var(--pa-muted);
+      font-size: 1rem;
+      max-width: 550px;
+      margin: 0 auto;
+      line-height: 1.45;
+  }
+
   .pa-user-card {
-      display: flex; align-items: center; gap: 10px;
-      padding: 8px 4px; margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 8px;
+      margin-bottom: 2px;
+      border-radius: 10px;
+      border: 1px solid var(--pa-line);
+    background: color-mix(in srgb, var(--pa-panel) 78%, transparent);
   }
+
   .pa-avatar {
-      width: 36px; height: 36px; border-radius: 50%;
-      background: #4285F4; color: white;
-      display: flex; align-items: center; justify-content: center;
-      font-weight: 700; font-size: 1rem; flex-shrink: 0;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: linear-gradient(160deg, var(--pa-brand) 0%, var(--pa-brand-2) 100%);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 1rem;
+      flex-shrink: 0;
   }
-  .pa-user-name  { font-weight: 600; font-size: 0.9rem; line-height: 1.2; }
-  .pa-user-email { color: #888; font-size: 0.72rem; }
 
-  /* ── Badges ──────────────────────────────────────────────── */
+  .pa-user-name { font-weight: 650; font-size: 0.9rem; line-height: 1.2; }
+  .pa-user-email { color: var(--pa-muted); font-size: 0.74rem; }
+
   .badge {
-      display: inline-block; padding: 2px 10px; border-radius: 20px;
-      font-size: 0.72rem; font-weight: 700; margin-left: 6px;
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      margin-left: 6px;
+      border: 1px solid rgba(0, 0, 0, 0.06);
   }
-  .b-blue   { background:#DBEAFE; color:#1D4ED8; }
-  .b-green  { background:#DCFCE7; color:#15803D; }
-  .b-yellow { background:#FEF9C3; color:#A16207; }
-  .b-red    { background:#FEE2E2; color:#B91C1C; }
-  .b-gray   { background:#F1F5F9; color:#475569; }
 
-  /* Dark-mode badge overrides */
-  [data-theme="dark"] .b-blue,
-  [class*="dark"] .b-blue   { background:#1E3A8A; color:#93C5FD; }
-  [data-theme="dark"] .b-green,
-  [class*="dark"] .b-green  { background:#14532D; color:#86EFAC; }
-  [data-theme="dark"] .b-yellow,
-  [class*="dark"] .b-yellow { background:#713F12; color:#FDE047; }
-  [data-theme="dark"] .b-red,
-  [class*="dark"] .b-red    { background:#7F1D1D; color:#FCA5A5; }
-  [data-theme="dark"] .b-gray,
-  [class*="dark"] .b-gray   { background:#334155; color:#CBD5E1; }
+  .b-blue   { background:#d8ecff; color:#0b55b5; }
+  .b-green  { background:#dcfce7; color:#127a3a; }
+  .b-yellow { background:#ffedd5; color:#c2410c; }
+  .b-red    { background:#fee2e2; color:#b91c1c; }
+  .b-gray   { background:#e2e8f0; color:#334155; }
 
-  /* ── Account row ─────────────────────────────────────────── */
+  .pa-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #ffffff;
+      font-size: 0.92rem;
+      font-weight: 700;
+      box-shadow: 0 7px 16px rgba(2, 16, 49, 0.22);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .i-blue { background: linear-gradient(145deg, #1e7bff 0%, #0da3c8 100%); }
+  .i-green { background: linear-gradient(145deg, #16a34a 0%, #15803d 100%); }
+  .i-orange { background: linear-gradient(145deg, #f97316 0%, #ea580c 100%); }
+  .i-red { background: linear-gradient(145deg, #ef4444 0%, #b91c1c 100%); }
+
+  .pa-kpi-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(120px, 1fr));
+      gap: 0.65rem;
+      margin-bottom: 0.95rem;
+  }
+
+  .pa-kpi-card {
+      border: 1px solid var(--pa-line);
+      border-radius: 12px;
+      padding: 0.75rem 0.8rem;
+      background: linear-gradient(180deg, var(--pa-panel) 0%, var(--pa-panel-alt) 100%);
+      box-shadow: var(--pa-shadow);
+  }
+
+  .pa-kpi-label {
+      font-size: 0.73rem;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--pa-muted);
+      margin-bottom: 0.2rem;
+      font-weight: 700;
+  }
+
+  .pa-kpi-value {
+      font-size: 1.05rem;
+      font-weight: 800;
+      color: var(--pa-text);
+      line-height: 1.25;
+  }
+
+  .pa-kpi-trend {
+      margin-top: 0.18rem;
+      font-size: 0.76rem;
+      font-weight: 650;
+  }
+
+  .trend-up { color: var(--pa-success); }
+  .trend-mid { color: var(--pa-warning); }
+  .trend-down { color: var(--pa-danger); }
+
+  .pa-table-head {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 2.7fr 1.3fr 1.1fr 1.4fr 1fr;
+      margin-bottom: 0.45rem;
+      color: var(--pa-muted);
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 700;
+      padding: 0 0.2rem;
+  }
+
+  .pa-row-sep {
+      border-top: 1px solid var(--pa-line);
+      margin: 0.38rem 0 0.45rem;
+  }
+
+  .pa-cell-meta {
+      color: var(--pa-muted);
+      font-size: 0.75rem;
+      margin-top: 0.1rem;
+  }
+
   .acc-row {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 0.75rem 1rem; border-radius: 8px;
-      background: var(--secondary-background-color);
-      border: 1px solid rgba(128,128,128,0.15);
-      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.82rem 1rem;
+      border-radius: 10px;
+    background: linear-gradient(180deg, var(--pa-panel) 0%, var(--pa-panel-alt) 100%);
+      border: 1px solid var(--pa-line);
+      margin-bottom: 0.55rem;
   }
 
-  /* ── Google sign-in button ───────────────────────────────── */
   .g-signin {
-      display: inline-flex; align-items: center; gap: 10px;
-      background: #fffcfc; color: white;
-      border: none; padding: 11px 24px; border-radius: 8px;
-      cursor: pointer; font-size: 0.95rem; font-weight: 600;
-      text-decoration: none; width: 100%; justify-content: center;
-      margin-top: 8px; box-sizing: border-box;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    background: var(--pa-panel);
+    color: var(--pa-text);
+      border: 1px solid rgba(24, 49, 95, 0.15);
+      padding: 11px 24px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 0.95rem;
+      font-weight: 600;
+      text-decoration: none;
+      width: 100%;
+      justify-content: center;
+      margin-top: 8px;
+      box-sizing: border-box;
+      transition: all 0.2s ease;
   }
-  .g-signin:hover { background: #3367D6; color: white; }
+
+  .g-signin:hover {
+      background: var(--pa-panel-alt);
+      color: var(--pa-brand-dark);
+      border-color: rgba(30, 123, 255, 0.4);
+      box-shadow: 0 8px 18px rgba(30, 123, 255, 0.16);
+  }
+
+  .pa-link-btn {
+      background: var(--pa-brand);
+      color: white !important;
+      border: none;
+      padding: 10px 22px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 0.95rem;
+      font-weight: 600;
+      transition: all 0.2s ease;
+  }
+
+  .pa-link-btn:hover {
+      background: var(--pa-brand-dark);
+  }
+
+  @media (max-width: 900px) {
+      .block-container {
+          padding: 1.2rem 1rem 1.1rem !important;
+      }
+      .pa-page-title {
+          font-size: 1.2rem;
+      }
+      .pa-auth-title {
+          font-size: 1.65rem;
+      }
+      .pa-kpi-strip {
+          grid-template-columns: repeat(2, minmax(120px, 1fr));
+      }
+      .pa-table-head {
+          display: none;
+      }
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -218,11 +562,11 @@ handle_oauth_redirect()
 
 # --- Sidebar ---
 PAGES     = ["Dashboard", "Calendar", "Preferences", "Senders", "Accounts"]
-PAGE_ICON = {"Dashboard": "📊", "Calendar": "📆", "Preferences": "🔧", "Senders": "👥", "Accounts": "🔗"}
+PAGE_ICON = {"Dashboard": "◈", "Calendar": "◴", "Preferences": "⚙", "Senders": "◎", "Accounts": "⛓"}
 
 with st.sidebar:
-    st.markdown("## 🤖 Personal Assistant")
-    st.caption("Your automated command center")
+    st.markdown("## Personal Assistant")
+    st.caption("Automation cockpit for email and calendar")
     st.divider()
 
     health, err = _get("/")
@@ -276,9 +620,9 @@ with st.sidebar:
 # --- Main App ---
 if not st.session_state.get("user_id"):
     st.markdown(
-        "<div style='text-align:center;padding:4rem 1rem'>"
-        "<div style='font-size:2.2rem;font-weight:800;margin-bottom:0.4rem'>� Personal Assistant</div>"
-        "<div style='color:#888;font-size:1rem'>Sign in from the sidebar to manage your Gmail, Calendar &amp; daily schedule.</div>"
+        "<div class='pa-auth-hero'>"
+        "<div class='pa-auth-title'>Personal Assistant</div>"
+        "<div class='pa-auth-sub'>Sign in from the sidebar to control Gmail sync, calendar scheduling, and your daily planning workflow from one place.</div>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -295,10 +639,27 @@ cfg = st.session_state["cfg"]
 page = st.session_state.get("page", "Dashboard")
 
 # --- Page header helper ---
+def _icon_chip(symbol: str, tone: str = "blue") -> str:
+    return f"<span class='pa-icon i-{tone}'>{symbol}</span>"
+
+
+def _kpi_strip(items: list[dict]):
+    cards = []
+    for item in items:
+        cards.append(
+            f"<div class='pa-kpi-card'>"
+            f"<div class='pa-kpi-label'>{item['label']}</div>"
+            f"<div class='pa-kpi-value'>{item['value']}</div>"
+            f"<div class='pa-kpi-trend {item['trend_class']}'>{item['trend']}</div>"
+            f"</div>"
+        )
+    st.markdown(f"<div class='pa-kpi-strip'>{''.join(cards)}</div>", unsafe_allow_html=True)
+
+
 def _ph(icon, title, subtitle=""):
     st.markdown(
         f'<div class="pa-page-header">'
-        f'<span style="font-size:1.5rem">{icon}</span>'
+        f"{icon}"
         f'<span class="pa-page-title">{title}</span></div>',
         unsafe_allow_html=True,
     )
@@ -309,25 +670,57 @@ def _ph(icon, title, subtitle=""):
 # DASHBOARD
 # ══════════════════════════════════════════════════════════════════
 if page == "Dashboard":
-    _ph("📊", "Dashboard", f"Good to see you, {user['email'].split('@')[0]}.")
+    _ph(_icon_chip("◈", "blue"), "Dashboard", f"Good to see you, {user['email'].split('@')[0]}.")
+
+    db = Session()
+    try:
+        linked_count = db.query(LinkedAccount).filter(LinkedAccount.owner_id == uid).count()
+    finally:
+        db.close()
+
+    sync_h = int(user.get("email_sync_hours") or 24)
+    digest_hour = int((user.get("notify_time") or "07:00").split(":")[0])
+    account_total = 1 + linked_count
+    tz_value = user.get("timezone") or "UTC"
+
+    _kpi_strip([
+        {
+            "label": "Sync Interval",
+            "value": f"Every {sync_h}h",
+            "trend": "▲ Fast" if sync_h <= 6 else ("→ Stable" if sync_h <= 24 else "▼ Slower"),
+            "trend_class": "trend-up" if sync_h <= 6 else ("trend-mid" if sync_h <= 24 else "trend-down"),
+        },
+        {
+            "label": "Digest Window",
+            "value": user.get("notify_time", "07:00"),
+            "trend": "▲ Morning" if digest_hour < 11 else "→ Scheduled",
+            "trend_class": "trend-up" if digest_hour < 11 else "trend-mid",
+        },
+        {
+            "label": "Total Accounts",
+            "value": str(account_total),
+            "trend": "▲ Multi-account" if account_total > 1 else "→ Single account",
+            "trend_class": "trend-up" if account_total > 1 else "trend-mid",
+        },
+        {
+            "label": "Timezone",
+            "value": tz_value,
+            "trend": "→ Active profile",
+            "trend_class": "trend-mid",
+        },
+    ])
 
     # Metrics row
     with st.container(border=True):
-        st.markdown("##### At a Glance")
-        db = Session()
-        try:
-            linked_count = db.query(LinkedAccount).filter(LinkedAccount.owner_id == uid).count()
-        finally:
-            db.close()
+        st.markdown(f"##### {_icon_chip('◍', 'blue')} At a Glance", unsafe_allow_html=True)
         c1, c2, c3 = st.columns(3)
-        sync_h = user.get("email_sync_hours") or 24
         c1.metric("📬 Email Sync",   f"Every {sync_h}h")
         c2.metric("📨 Daily Digest", user["notify_time"])
         c3.metric("📂 Accounts",     1 + linked_count)
 
     # Run manually
     with st.container(border=True):
-        st.markdown("##### Sync Now")
+        st.markdown(f"##### {_icon_chip('▶', 'green')} Sync Now", unsafe_allow_html=True)
         send_email_opt = st.checkbox("Send today's schedule to my email after syncing")
         if st.button("▶  Run Sync", type="primary", use_container_width=True):
             with st.spinner("Syncing…"):
@@ -374,7 +767,7 @@ if page == "Dashboard":
     with st.container(border=True):
         hc1, hc2 = st.columns([6, 1])
         with hc1:
-            st.markdown("##### 📅 Today's Schedule")
+            st.markdown(f"##### {_icon_chip('◷', 'orange')} Today's Schedule", unsafe_allow_html=True)
         with hc2:
             if st.button("🔄 Refresh", key="dash_refresh"):
                 data, _ = _get("/api/schedule", user_id=uid)
@@ -394,7 +787,7 @@ if page == "Dashboard":
 # CALENDAR
 # ══════════════════════════════════════════════════════════════════
 elif page == "Calendar":
-    _ph("�", "Calendar", "Your schedule at a glance.")
+    _ph(_icon_chip("◴", "blue"), "Calendar", "Your schedule at a glance.")
 
     cal_l, cal_r = st.columns([1, 1], gap="large")
 
@@ -402,7 +795,7 @@ elif page == "Calendar":
         with st.container(border=True):
             ch1, ch2 = st.columns([5, 1])
             with ch1:
-                st.markdown("##### 📅 Today's Events")
+                st.markdown(f"##### {_icon_chip('◷', 'orange')} Today's Events", unsafe_allow_html=True)
             with ch2:
                 if st.button("🔄", key="cal_refresh", help="Refresh"):
                     data, _ = _get("/api/schedule", user_id=uid)
@@ -415,7 +808,7 @@ elif page == "Calendar":
 
     with cal_r:
         with st.container(border=True):
-            st.markdown("##### ➕ Add New Event")
+            st.markdown(f"##### {_icon_chip('+', 'green')} Add New Event", unsafe_allow_html=True)
             with st.form("new_event"):
                 evt_title = st.text_input("Title", placeholder="Team Standup")
                 evt_desc  = st.text_area(
@@ -442,13 +835,13 @@ elif page == "Calendar":
 # PREFERENCES
 # ══════════════════════════════════════════════════════════════════
 elif page == "Preferences":
-    _ph("🔧", "Preferences", "Manage your notification and account settings.")
+    _ph(_icon_chip("⚙", "orange"), "Preferences", "Manage your notification and account settings.")
 
     pref_l, pref_r = st.columns([3, 2], gap="large")
 
     with pref_l:
         with st.container(border=True):
-            st.markdown("##### 🔔 Notification Settings")
+            st.markdown(f"##### {_icon_chip('◉', 'orange')} Notification Settings", unsafe_allow_html=True)
             with st.form("prefs"):
                 h, m = map(int, user.get("notify_time", "07:00").split(":"))
                 notify_time  = st.time_input("Daily notification time", value=datetime.time(h, m))
@@ -501,7 +894,7 @@ elif page == "Preferences":
 
     with pref_r:
         with st.container(border=True):
-            st.markdown("##### 📋 Current Settings")
+            st.markdown(f"##### {_icon_chip('≡', 'blue')} Current Settings", unsafe_allow_html=True)
             st.markdown(f"**Notify Time:** &nbsp;`{user.get('notify_time', '—')}`", unsafe_allow_html=True)
             st.markdown(f"**Timezone:** &nbsp;`{user.get('timezone', '—')}`", unsafe_allow_html=True)
             notify_val = user.get("notify_email") or "_not set_"
@@ -515,7 +908,7 @@ elif page == "Preferences":
 # SENDERS
 # ══════════════════════════════════════════════════════════════════
 elif page == "Senders":
-    _ph("👥", "Sender Priorities", "Mark important email senders so you can prioritize them.")
+    _ph(_icon_chip("◎", "green"), "Sender Priorities", "Mark important email senders so you can prioritize them.")
 
     if st.button("🔄 Refresh Senders", key="senders_refresh"):
         st.session_state.pop("senders_list", None)
@@ -534,18 +927,30 @@ elif page == "Senders":
         st.info("No senders found yet. Run a sync to fetch emails and discover senders.")
     else:
         with st.container(border=True):
-            st.markdown(f"##### Found {len(senders_list)} Unique Sender(s)")
-            
+            st.markdown(f"##### {_icon_chip('≣', 'green')} Found {len(senders_list)} Unique Sender(s)", unsafe_allow_html=True)
+            st.markdown(
+                "<div class='pa-table-head'><span>Sender</span><span>Domain</span><span>Current</span><span>Set Priority</span><span>Action</span></div>",
+                unsafe_allow_html=True,
+            )
+
             for sender_obj in senders_list:
                 sender_email = sender_obj.get("email", "")
                 current_priority = sender_obj.get("priority", "medium")
+                sender_domain = sender_email.split("@")[-1] if "@" in sender_email else "-"
+                current_label = current_priority.capitalize()
+                current_badge = PRIORITY_COLOR.get(current_label, "b-gray")
                 
-                col1, col2, col3 = st.columns([3, 1, 1])
+                col1, col2, col3, col4, col5 = st.columns([3, 1.35, 1.15, 1.4, 1])
                 
                 with col1:
                     st.markdown(f"**{sender_email}**")
-                
+                    st.markdown("<div class='pa-cell-meta'>Sender profile</div>", unsafe_allow_html=True)
                 with col2:
+                    st.markdown(f"**{sender_domain}**")
+                with col3:
+                    st.markdown(f"<span class='badge {current_badge}'>{current_label}</span>", unsafe_allow_html=True)
+                
+                with col4:
                     priority_options = ["High", "Medium", "Low"]
                     current_idx = {"high": 0, "medium": 1, "low": 2}.get(current_priority.lower(), 1)
                     selected = st.selectbox(
@@ -556,7 +961,7 @@ elif page == "Senders":
                         label_visibility="collapsed",
                     )
                 
-                with col3:
+                with col5:
                     if st.button("Save", key=f"save_{sender_email}", use_container_width=True):
                         _update_res, _err = _post(
                             "/api/sender-priorities",
@@ -573,11 +978,13 @@ elif page == "Senders":
                             st.session_state.pop("senders_list", None)
                             st.rerun()
 
+                st.markdown("<div class='pa-row-sep'></div>", unsafe_allow_html=True)
+
 # ══════════════════════════════════════════════════════════════════
 # ACCOUNTS
 # ══════════════════════════════════════════════════════════════════
 elif page == "Accounts":
-    _ph("🔗", "Connected Accounts", "Manage the Gmail accounts synced to your assistant.")
+    _ph(_icon_chip("⛓", "blue"), "Connected Accounts", "Manage the Gmail accounts synced to your assistant.")
 
     if st.button("🔄 Refresh", key="accs_refresh"):
         st.session_state.pop("linked_accounts", None)
@@ -589,29 +996,39 @@ elif page == "Accounts":
     linked_accounts = st.session_state["linked_accounts"]
 
     with st.container(border=True):
-        st.markdown("##### 👤 Primary Account")
-        st.markdown(
-            f'<div class="acc-row">'
-            f'<div><strong>{user["email"]}</strong>'
-            f'<span class="badge b-blue" style="margin-left:8px">Primary</span></div>'
-            f'<span style="color:#22c55e;font-size:0.82rem;font-weight:600">✓ Active</span>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(f"##### {_icon_chip('◉', 'blue')} Primary Account", unsafe_allow_html=True)
+        p1, p2, p3 = st.columns([4, 1.3, 1.3])
+        with p1:
+            st.markdown(f"**{user['email']}**")
+            st.markdown("<div class='pa-cell-meta'>Owner profile</div>", unsafe_allow_html=True)
+        with p2:
+            st.markdown("<span class='badge b-blue'>Primary</span>", unsafe_allow_html=True)
+        with p3:
+            st.markdown("<span class='badge b-green'>Active</span>", unsafe_allow_html=True)
 
     with st.container(border=True):
-        st.markdown("##### 🔗 Linked Accounts")
+        st.markdown(f"##### {_icon_chip('≣', 'blue')} Linked Accounts", unsafe_allow_html=True)
         if not linked_accounts:
             st.info("No linked accounts yet. Add one below.")
         else:
+            st.markdown(
+                "<div class='pa-table-head'><span>Account</span><span>Domain</span><span>Role</span><span>Status</span><span>Action</span></div>",
+                unsafe_allow_html=True,
+            )
             for _la in linked_accounts:
-                lc1, lc2 = st.columns([5, 1])
+                email = _la.get("email", "")
+                domain = email.split("@")[-1] if "@" in email else "-"
+                lc1, lc2, lc3, lc4, lc5 = st.columns([2.7, 1.3, 1.1, 1.4, 1])
                 with lc1:
-                    st.markdown(
-                        f'<div style="padding:6px 0"><strong>{_la["email"]}</strong></div>',
-                        unsafe_allow_html=True,
-                    )
+                    st.markdown(f"**{email}**")
+                    st.markdown(f"<div class='pa-cell-meta'>Linked ID: {_la.get('id', '-')}</div>", unsafe_allow_html=True)
                 with lc2:
+                    st.markdown(f"**{domain}**")
+                with lc3:
+                    st.markdown("<span class='badge b-gray'>Linked</span>", unsafe_allow_html=True)
+                with lc4:
+                    st.markdown("<span class='badge b-green'>Active</span>", unsafe_allow_html=True)
+                with lc5:
                     if st.button("Remove", key=f"del_{_la['id']}", type="secondary"):
                         _r = requests.delete(
                             f"{API}/linked-accounts/{_la['id']}",
@@ -623,13 +1040,13 @@ elif page == "Accounts":
                             st.rerun()
                         else:
                             st.toast("Could not remove account. Please try again.", icon="❌")
+                st.markdown("<div class='pa-row-sep'></div>", unsafe_allow_html=True)
     with st.container(border=True):
-        st.markdown("##### ➕ Add Account")
+        st.markdown(f"##### {_icon_chip('+', 'green')} Add Account", unsafe_allow_html=True)
         st.caption("Connect another Gmail account to sync all your emails in one place.")
         st.markdown(
             f'<a href="{API}/link-account?owner_id={uid}" target="_self" style="text-decoration:none;">'
-            '<button style="background:#34a853;color:white;border:none;padding:10px 22px;'
-            'border-radius:8px;cursor:pointer;font-size:0.95rem;font-weight:600;">'
+            '<button class="pa-link-btn">'
             '➕ Connect Gmail Account</button></a>',
             unsafe_allow_html=True,
         )
