@@ -10,6 +10,7 @@ API docs available at http://localhost:8000/docs
 """
 
 import logging
+import os
 import uvicorn
 from app.scheduler import start_scheduler
 
@@ -24,12 +25,13 @@ if __name__ == "__main__":
     logger.info("Starting scheduler...")
     start_scheduler()
 
-    logger.info("Starting web server at http://localhost:8000")
-    logger.info("API docs at http://localhost:8000/docs")
+    port = int(os.getenv("PORT", 8000))
+    logger.info(f"Starting web server at http://0.0.0.0:{port}")
+    logger.info(f"API docs at http://0.0.0.0:{port}/docs")
 
     uvicorn.run(
         "web_app:app",
         host="0.0.0.0",
-        port=8000,
+        port=port,
         reload=False,  # reload=True conflicts with APScheduler
     )

@@ -2,12 +2,13 @@
 from typing import Optional
 import logging
 import datetime as _dt
+from email.utils import parseaddr
 from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 
 from app.auth_web import get_user_services
-from app.models import User, LinkedAccount, SenderPriority, get_db
+from app.models import User, LinkedAccount, SenderPriority, get_db, Session
 from app.services.calendar_manager import create_event
 from app.services.daily_plan import get_today_schedule
 from app.services.email_parser import enrich_email_analysis, parse_email_with_gemini
@@ -16,6 +17,13 @@ from app.services.notifier import send_whatsapp
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _normalize_sender(sender: str) -> str:
+    """Normalize sender values to a stable lowercase email key."""
+    _, parsed_email = parseaddr(sender or "")
+    candidate = (parsed_email or sender or "").strip().lower()
+    return candidate
     
 
 class RunAssistantRequest(BaseModel):
@@ -84,7 +92,7 @@ def run_assistant(req: RunAssistantRequest):
 
         for email in all_emails:
             subject = email.get("subject", "")
-            sender  = email.get("from_", "")
+            sender  = _normalize_sender(email.get("from_", ""))
             body    = email.get("body", "")
             pdf_texts = [
                 att.get("extracted_text")
@@ -231,7 +239,7 @@ def api_fetch_emails(req: FetchEmailsRequest):
         result = []
         for email in emails:
             subject = email.get("subject", "")
-            sender = email.get("from_", "")
+            sender = _normalize_sender(email.get("from_", ""))
             body = email.get("body", "")
             pdf_texts = [
                 att.get("extracted_text")
@@ -298,16 +306,21 @@ def get_senders(user_id: str = Query(...)):
             raise HTTPException(status_code=404, detail="User not found.")
             
         senders_records = db.query(SenderPriority).filter(SenderPriority.user_id == user_id).all()
-        
-        # Format the response to match what the frontend expects
-        response_data = {
-            "senders": [
-                {
-                    "email": record.sender,
+
+        # Deduplicate sender rows defensively to avoid repeated entries in UI.
+        unique_senders = {}
+        for record in senders_records:
+            sender_key = _normalize_sender(record.sender)
+            if not sender_key:
+                continue
+            if sender_key not in unique_senders:
+                unique_senders[sender_key] = {
+                    "email": sender_key,
                     "priority": record.priority,
                 }
-                for record in senders_records
-            ]
+
+        response_data = {
+            "senders": list(unique_senders.values())
         }
         
         # Sort alphabetically by email
@@ -329,6 +342,10 @@ def update_sender_priority(req: UpdateSenderPriorityRequest):
     if req.priority.lower() not in ["high", "medium", "low"]:
         raise HTTPException(status_code=400, detail="Priority must be 'high', 'medium', or 'low'")
     
+    normalized_sender = _normalize_sender(req.sender)
+    if not normalized_sender:
+        raise HTTPException(status_code=400, detail="Sender is required")
+
     db = Session()
     try:
         user = db.get(User, req.user_id)
@@ -338,7 +355,7 @@ def update_sender_priority(req: UpdateSenderPriorityRequest):
         # Check if record exists
         sp_record = db.query(SenderPriority).filter(
             SenderPriority.user_id == req.user_id,
-            SenderPriority.sender == req.sender
+            SenderPriority.sender == normalized_sender
         ).first()
         
         if sp_record:
@@ -346,7 +363,7 @@ def update_sender_priority(req: UpdateSenderPriorityRequest):
         else:
             new_record = SenderPriority(
                 user_id=req.user_id,
-                sender=req.sender,
+                sender=normalized_sender,
                 priority=req.priority.lower()
             )
             db.add(new_record)
@@ -354,7 +371,7 @@ def update_sender_priority(req: UpdateSenderPriorityRequest):
         db.commit()
         
         return {
-            "message": f"Priority for {req.sender} updated to {req.priority}",
+            "message": f"Priority for {normalized_sender} updated to {req.priority}",
         }
     finally:
         db.close()

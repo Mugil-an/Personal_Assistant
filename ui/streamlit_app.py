@@ -955,7 +955,7 @@ elif page == "Senders":
                 unsafe_allow_html=True,
             )
 
-            for sender_obj in senders_list:
+            for i, sender_obj in enumerate(senders_list):
                 sender_email = sender_obj.get("email", "")
                 current_priority = sender_obj.get("priority", "medium")
                 sender_domain = sender_email.split("@")[-1] if "@" in sender_email else "-"
@@ -979,12 +979,12 @@ elif page == "Senders":
                         "Priority",
                         options=priority_options,
                         index=current_idx,
-                        key=f"priority_{sender_email}",
+                        key=f"priority_{i}_{sender_email}",
                         label_visibility="collapsed",
                     )
                 
                 with col5:
-                    if st.button("Save", key=f"save_{sender_email}", use_container_width=True):
+                    if st.button("Save", key=f"save_{i}_{sender_email}", use_container_width=True):
                         _update_res, _err = _post(
                             "/api/sender-priorities",
                             {

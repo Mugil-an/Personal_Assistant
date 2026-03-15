@@ -12,6 +12,7 @@ Jobs (all per-user, managed by schedule_notifications):
 
 import datetime
 import logging
+from email.utils import parseaddr
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -29,6 +30,13 @@ from app.services.notifier import send_whatsapp
 
 logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler(timezone="UTC")
+
+
+def _normalize_sender(sender: str) -> str:
+    """Normalize sender values to a stable lowercase email key."""
+    _, parsed_email = parseaddr(sender or "")
+    candidate = (parsed_email or sender or "").strip().lower()
+    return candidate
 
 
 def _valid_timezone_name(value: str | None) -> str:
@@ -105,7 +113,7 @@ def _process_gmail_account(
 
     for email in emails:
         subject = email.get("subject", "")
-        sender  = email.get("from_", "")
+        sender  = _normalize_sender(email.get("from_", ""))
         body    = email.get("body", "")
 
         # Collect PDF attachment texts to feed into Gemini

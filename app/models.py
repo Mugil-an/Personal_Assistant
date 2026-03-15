@@ -97,12 +97,6 @@ Base.metadata.create_all(engine)
 
 # Lightweight migration: add columns/tables if upgrading from an older schema
 from sqlalchemy import inspect, text as _text
-def get_db():
-    db = Session()
-    try:
-        yield db
-    finally:
-        db.close()
 
 #     _cols = [c["name"] for c in inspect(engine).get_columns("users")]
 #     if "gmail_query" not in _cols:
