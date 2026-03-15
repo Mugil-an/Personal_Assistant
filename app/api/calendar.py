@@ -3,11 +3,12 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session as DBSession
 
 from app.auth_web import get_user_services
-from app.models import Session, User
+from app.models import User, get_db
 from app.services.calendar_manager import create_event
 from app.services.daily_plan import get_today_schedule
 
@@ -22,14 +23,10 @@ class CreateEventRequest(BaseModel):
 
 
 @router.get("/api/schedule")
-def api_schedule(user_id: str = Query(...)):
-    db = Session()
-    try:
-        user = db.get(User, user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found.")
-    finally:
-        db.close()
+def api_schedule(user_id: str = Query(...), db: DBSession = Depends(get_db)):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
 
     try:
         _, calendar = get_user_services(user.token_json)
@@ -40,14 +37,10 @@ def api_schedule(user_id: str = Query(...)):
 
 
 @router.post("/api/create-event")
-def api_create_event(req: CreateEventRequest):
-    db = Session()
-    try:
-        user = db.get(User, req.user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found.")
-    finally:
-        db.close()
+def api_create_event(req: CreateEventRequest, db: DBSession = Depends(get_db)):
+    user = db.get(User, req.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
 
     try:
         _, calendar = get_user_services(user.token_json)

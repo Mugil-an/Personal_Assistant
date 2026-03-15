@@ -75,9 +75,20 @@ class SeenEmail(Base):
 # _DATA_DIR = os.path.join(_BASE_DIR, "data")
 # os.makedirs(_DATA_DIR, exist_ok=True)
 
-database_url = os.getenv("DATABASE_URL")
-if not database_url or not database_url.startswith("postgresql"):
-    raise ValueError("DATABASE_URL environment variable for PostgreSQL is not set. Please configure it in your .env file.")
+database_url = (os.getenv("DATABASE_URL") or "").strip().strip('"').strip("'")
+
+# Render commonly provides postgres://... while SQLAlchemy expects postgresql://...
+if database_url.startswith("postgres://"):
+    database_url = "postgresql://" + database_url[len("postgres://") :]
+
+if not database_url or not (
+    database_url.startswith("postgresql://")
+    or database_url.startswith("postgresql+")
+):
+    raise ValueError(
+        "DATABASE_URL must be a PostgreSQL URL (postgresql://...). "
+        "Please configure it in your environment."
+    )
 
 engine = create_engine(
     database_url
@@ -86,7 +97,13 @@ Base.metadata.create_all(engine)
 
 # Lightweight migration: add columns/tables if upgrading from an older schema
 from sqlalchemy import inspect, text as _text
-# with engine.connect() as _conn:
+def get_db():
+    db = Session()
+    try:
+        yield db
+    finally:
+        db.close()
+
 #     _cols = [c["name"] for c in inspect(engine).get_columns("users")]
 #     if "gmail_query" not in _cols:
 #         _conn.execute(_text("ALTER TABLE users ADD COLUMN gmail_query VARCHAR"))

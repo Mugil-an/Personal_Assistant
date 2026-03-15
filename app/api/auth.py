@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 
 import requests as _requests
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
@@ -14,9 +15,10 @@ from app.models import Session, User, LinkedAccount, get_db
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Change these to your deployed URLs in production
-BASE_URL      = "http://localhost:8000"
-STREAMLIT_URL = "http://localhost:8501"
+
+# URLs should be configured via environment variables for production
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
+STREAMLIT_URL = os.getenv("STREAMLIT_URL", "http://localhost:8501")
 
 REDIRECT_URI       = f"{BASE_URL}/oauth/callback"
 LINK_REDIRECT_URI  = f"{BASE_URL}/link-account/callback"
@@ -37,7 +39,7 @@ def signup():
 
 
 @router.get("/oauth/callback", summary="Google OAuth callback")
-def oauth_callback(request: Request):
+def oauth_callback(request: Request, db: DBSession = Depends(get_db)):
     """Google redirects here after the user grants permission."""
     error = request.query_params.get("error")
     if error:
@@ -80,7 +82,6 @@ def oauth_callback(request: Request):
 
     token_dict = json.loads(creds.to_json())
 
-    db = Session()
     try:
         user = db.get(User, user_id)
         if not user:
@@ -96,8 +97,6 @@ def oauth_callback(request: Request):
         db.rollback()
         logger.exception("Database error during sign-up")
         raise HTTPException(status_code=500, detail=f"Database error: {exc}")
-    finally:
-        db.close()
 
     response = RedirectResponse(f"{STREAMLIT_URL}/?user_id={user_id}")
     response.delete_cookie("oauth_state")
@@ -126,7 +125,7 @@ def link_account(owner_id: str = Query(..., description="Primary user ID")):
 
 
 @router.get("/link-account/callback", summary="OAuth callback for linked account")
-def link_account_callback(request: Request):
+def link_account_callback(request: Request, db: DBSession = Depends(get_db)):
     error = request.query_params.get("error")
     if error:
         raise HTTPException(status_code=400, detail=f"Google OAuth error: {error}")
@@ -180,7 +179,6 @@ def link_account_callback(request: Request):
         )
 
     token_dict = json.loads(creds.to_json())
-    db = Session()
     try:
         existing = db.get(LinkedAccount, account_id)
         if existing:
@@ -196,8 +194,12 @@ def link_account_callback(request: Request):
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {exc}")
-    finally:
-        db.close()
+    
+    response = RedirectResponse(f"{STREAMLIT_URL}/?user_id={owner_id}&linked_account=true")
+    response.delete_cookie("oauth_link_state")
+    response.delete_cookie("oauth_link_code_verifier")
+    response.delete_cookie("oauth_owner_id")
+    return response
 
     response = RedirectResponse(f"{STREAMLIT_URL}/?user_id={owner_id}")
     response.delete_cookie("oauth_link_state")

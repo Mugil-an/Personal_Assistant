@@ -2,11 +2,12 @@
 from typing import Optional
 import logging
 import datetime as _dt
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session as DBSession
 
 from app.auth_web import get_user_services
-from app.models import Session, User, LinkedAccount, SenderPriority
+from app.models import User, LinkedAccount, SenderPriority, get_db
 from app.services.calendar_manager import create_event
 from app.services.daily_plan import get_today_schedule
 from app.services.email_parser import enrich_email_analysis, parse_email_with_gemini

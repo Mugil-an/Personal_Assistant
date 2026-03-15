@@ -2,8 +2,10 @@
 
 import os
 
-# Allow OAuth over plain HTTP in development (localhost). Remove in production.
-os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+# Allow OAuth over plain HTTP for local development.
+# In production, this should be disabled and HTTPS should be used.
+if os.getenv("ENV") != "production":
+    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 from fastapi import FastAPI
 from app.api import auth, emails, calendar, system
