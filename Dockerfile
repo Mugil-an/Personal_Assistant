@@ -20,3 +20,6 @@ COPY . /app
 
 RUN mkdir -p /app/tokens
 RUN chmod +x /app/wait-for-postgres.sh
+
+# Start API process (run.py reads Render's PORT and boots scheduler + FastAPI).
+CMD ["python", "run.py"]
