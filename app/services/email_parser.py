@@ -15,6 +15,54 @@ _quota_guard_lock = threading.Lock()
 _quota_block_until_monotonic = 0.0
 
 
+def _strip_markdown_code_fence(text: str) -> str:
+    """Strip optional markdown code fences from model output."""
+    stripped = (text or "").strip()
+    if stripped.startswith("```") and stripped.endswith("```"):
+        lines = stripped.splitlines()
+        if len(lines) >= 3:
+            return "\n".join(lines[1:-1]).strip()
+    return stripped
+
+
+def _parse_gemini_json_payload(text: str) -> Optional[Dict[str, Any]]:
+    """Best-effort parse of Gemini JSON payload.
+
+    Gemini can occasionally return JSON wrapped in markdown fences or include
+    minor formatting issues such as trailing commas.
+    """
+    cleaned = _strip_markdown_code_fence(text)
+    if not cleaned:
+        return None
+
+    # Fast path: strict JSON.
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # Some responses include prose around the JSON object.
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidate = cleaned[start : end + 1]
+    else:
+        candidate = cleaned
+
+    # Remove trailing commas before closing object/array tokens.
+    candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
+
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError as decode_error:
+        logger.warning(
+            "Failed to parse Gemini JSON payload after cleanup: %s. Payload preview: %r",
+            decode_error,
+            candidate[:500],
+        )
+        return None
+
+
 def _extract_retry_delay_seconds(error_text: str) -> int:
     """Extract retry delay from Gemini error text when available."""
     match = re.search(r"retry in\s+([0-9]+(?:\.[0-9]+)?)s", error_text, flags=re.IGNORECASE)
@@ -322,8 +370,11 @@ def parse_email_with_gemini(
             full_prompt,
             generation_config=generation_config,
         )
-
-        return json.loads(response.text)
+        parsed = _parse_gemini_json_payload(getattr(response, "text", ""))
+        if parsed is None:
+            logger.warning("Gemini response was not valid JSON after cleanup; skipping email analysis.")
+            return None
+        return parsed
     except Exception as e:
         error_text = str(e)
         if _is_quota_exhausted_error(error_text):

@@ -3,11 +3,13 @@ import io
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import GMAIL_MAX_RESULTS, GMAIL_QUERY
+from app.models import SeenEmail
 
 try:
     import pypdf
@@ -46,6 +48,37 @@ def _save_seen_ids(seen: set, path: str | None = None) -> None:
             json.dump(list(seen), fh)
     except Exception as exc:
         logger.warning("Could not save seen email IDs to %s: %s", target, exc)
+
+
+def _load_seen_ids_from_db(db: Any, account_id: str, candidate_ids: List[str]) -> set[str]:
+    """Load seen IDs for one account from DB for a given candidate set."""
+    if not candidate_ids:
+        return set()
+    rows = (
+        db.query(SeenEmail.message_id)
+        .filter(SeenEmail.account_id == account_id, SeenEmail.message_id.in_(candidate_ids))
+        .all()
+    )
+    return {row[0] for row in rows}
+
+
+def _save_seen_ids_to_db(db: Any, account_id: str, message_ids: set[str]) -> None:
+    """Persist newly seen message IDs for one account."""
+    if not message_ids:
+        return
+
+    existing_rows = (
+        db.query(SeenEmail.message_id)
+        .filter(SeenEmail.account_id == account_id, SeenEmail.message_id.in_(list(message_ids)))
+        .all()
+    )
+    existing = {row[0] for row in existing_rows}
+    to_insert = message_ids - existing
+    if not to_insert:
+        return
+
+    db.add_all([SeenEmail(account_id=account_id, message_id=msg_id) for msg_id in to_insert])
+    db.commit()
 
 
 def _decode_body_from_payload(payload: Dict[str, Any]) -> str:
@@ -180,12 +213,46 @@ def _get_message(service: Any, msg_id: str) -> Dict[str, Any]:
     )
 
 
+def _is_transient_network_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    patterns = [
+        r"timed out",
+        r"timeout",
+        r"connection aborted",
+        r"connection reset",
+        r"unexpected eof",
+        r"temporary failure",
+        r"ssl",
+        r"winerror\s*10053",
+        r"winerror\s*10060",
+        r"unable to find the server",
+    ]
+    return any(re.search(p, text) for p in patterns)
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True,
+)
+def _list_messages_page(service: Any, query: str, page_token: str | None, remaining: int) -> Dict[str, Any]:
+    """Fetch one Gmail message-list page with retry for transient network faults."""
+    list_req = (
+        service.users()
+        .messages()
+        .list(userId="me", q=query, pageToken=page_token, maxResults=min(remaining, 100))
+    )
+    return list_req.execute()
+
+
 def fetch_emails(
     service,
     query: str | None = None,
     max_results: int | None = None,
     seen_ids_file: str | None = None,
     after_epoch: int | None = None,
+    db: Any | None = None,
+    seen_account_id: str | None = None,
 ) -> List[Dict[str, Any]]:
     """Fetch recent emails matching the configured query from Gmail.
 
@@ -200,6 +267,8 @@ def fetch_emails(
     after_epoch: Optional Unix timestamp (seconds). When provided, only emails
         received at or after this time are fetched (appended as ``after:<ts>``
         to the Gmail query).
+    db: Optional SQLAlchemy session for DB-backed seen-ID tracking.
+    seen_account_id: Account ID used with ``db`` for per-account deduplication.
 
     Returns a list of dicts with keys:
         subject, from_, to, date, body, attachments.
@@ -217,7 +286,9 @@ def fetch_emails(
 
     logger.info("Fetching emails with query='%s' (max %s)", query, max_results)
 
-    seen_ids = _load_seen_ids(seen_ids_file)
+    use_db_seen_tracking = db is not None and bool(seen_account_id)
+    seen_ids = set() if use_db_seen_tracking else _load_seen_ids(seen_ids_file)
+    new_seen_ids_db: set[str] = set()
     email_data: List[Dict[str, Any]] = []
     page_token = None
 
@@ -227,13 +298,18 @@ def fetch_emails(
             if remaining <= 0:
                 break
 
-            list_req = (
-                service.users()
-                .messages()
-                .list(userId="me", q=query, pageToken=page_token, maxResults=min(remaining, 100))
-            )
-            results = list_req.execute()
+            try:
+                results = _list_messages_page(service, query, page_token, remaining)
+            except Exception as exc:
+                level = logger.warning if _is_transient_network_error(exc) else logger.error
+                level("Failed to list Gmail messages after retries: %s", exc)
+                break
             messages = results.get("messages", [])
+
+            seen_ids_this_page: set[str] = set()
+            if use_db_seen_tracking:
+                candidate_ids = [m.get("id") for m in messages if m.get("id")]
+                seen_ids_this_page = _load_seen_ids_from_db(db, seen_account_id, candidate_ids)
 
             for msg in messages:
                 if len(email_data) >= max_results:
@@ -244,14 +320,15 @@ def fetch_emails(
                     continue
 
                 # Skip already-processed emails
-                if msg_id in seen_ids:
+                if msg_id in seen_ids or msg_id in seen_ids_this_page:
                     logger.debug("Skipping already-seen message %s", msg_id)
                     continue
 
                 try:
                     txt = _get_message(service, msg_id)
                 except Exception as exc:
-                    logger.error("Failed to fetch message %s after retries: %s", msg_id, exc)
+                    level = logger.warning if _is_transient_network_error(exc) else logger.error
+                    level("Failed to fetch message %s after retries: %s", msg_id, exc)
                     continue
 
                 payload = txt.get("payload", {})
@@ -281,6 +358,8 @@ def fetch_emails(
                     }
                 )
                 seen_ids.add(msg_id)
+                if use_db_seen_tracking:
+                    new_seen_ids_db.add(msg_id)
 
             page_token = results.get("nextPageToken")
             if not page_token:
@@ -289,6 +368,9 @@ def fetch_emails(
     except Exception as exc:
         logger.error("Error while fetching emails: %s", exc)
 
-    _save_seen_ids(seen_ids, seen_ids_file)
+        if use_db_seen_tracking:
+            _save_seen_ids_to_db(db, seen_account_id, new_seen_ids_db)
+        else:
+            _save_seen_ids(seen_ids, seen_ids_file)
     logger.info("Fetched %d new email(s) matching query", len(email_data))
     return email_data

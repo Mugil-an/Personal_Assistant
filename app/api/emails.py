@@ -1,6 +1,4 @@
 """Email-related API routes: run assistant pipeline and fetch/parse emails."""
-
-import time
 from typing import Optional
 import logging
 import datetime as _dt
@@ -58,22 +56,17 @@ def run_assistant(req: RunAssistantRequest):
         for linked in linked_accounts:
             accounts_to_sync.append((linked.id, linked.token_json, linked))
         
-        # Process each account with per-account seen-IDs tracking
-        def _seen_ids_file(account_id: str) -> str:
-            """Return a unique seen-IDs file path for an account."""
-            import os
-            safe = "".join(c for c in account_id if c.isalnum() or c in "-_")
-            # Corrected path to be at the project root's data directory
-            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            seen_dir = os.path.join(project_root, "data", ".seen_ids")
-            os.makedirs(seen_dir, exist_ok=True)
-            return os.path.join(seen_dir, f"{safe}.json")
-        
         for account_id, token_json, db_obj in accounts_to_sync:
             try:
                 acct_gmail, acct_calendar = get_user_services(token_json, db=None, db_obj=None)
-                account_seen_ids_file = _seen_ids_file(account_id)
-                emails = fetch_emails(acct_gmail, query=None, max_results=req.max_results, after_epoch=after_epoch, seen_ids_file=account_seen_ids_file)
+                emails = fetch_emails(
+                    acct_gmail,
+                    query=None,
+                    max_results=req.max_results,
+                    after_epoch=after_epoch,
+                    db=db,
+                    seen_account_id=account_id,
+                )
                 for email in emails:
                     email['account_id'] = account_id
                 all_emails.extend(emails)
@@ -92,8 +85,17 @@ def run_assistant(req: RunAssistantRequest):
             subject = email.get("subject", "")
             sender  = email.get("from_", "")
             body    = email.get("body", "")
-            parsed  = parse_email_with_gemini(body, email_subject=subject, email_sender=sender)
-            time.sleep(3)
+            pdf_texts = [
+                att.get("extracted_text")
+                for att in email.get("attachments", [])
+                if att.get("extracted_text")
+            ]
+            parsed = parse_email_with_gemini(
+                body,
+                attachment_texts=pdf_texts or None,
+                email_subject=subject,
+                email_sender=sender,
+            )
             
             db_user_id = user.id
 
@@ -217,13 +219,30 @@ def api_fetch_emails(req: FetchEmailsRequest):
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Auth failed: {exc}")
 
-        emails = fetch_emails(gmail, query=req.query, max_results=req.max_results)
+        seen_account_id = req.linked_account_id or req.user_id
+        emails = fetch_emails(
+            gmail,
+            query=req.query,
+            max_results=req.max_results,
+            db=db,
+            seen_account_id=seen_account_id,
+        )
         result = []
         for email in emails:
             subject = email.get("subject", "")
             sender = email.get("from_", "")
             body = email.get("body", "")
-            parsed = parse_email_with_gemini(body, email_subject=subject, email_sender=sender)
+            pdf_texts = [
+                att.get("extracted_text")
+                for att in email.get("attachments", [])
+                if att.get("extracted_text")
+            ]
+            parsed = parse_email_with_gemini(
+                body,
+                attachment_texts=pdf_texts or None,
+                email_subject=subject,
+                email_sender=sender,
+            )
 
             sp_record = db.query(SenderPriority).filter(
                 SenderPriority.user_id == req.user_id,

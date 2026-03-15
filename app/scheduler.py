@@ -12,7 +12,6 @@ Jobs (all per-user, managed by schedule_notifications):
 
 import datetime
 import logging
-import os
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -30,10 +29,6 @@ from app.services.notifier import send_whatsapp
 logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler(timezone="UTC")
 
-# Directory where per-account seen-IDs files are stored
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_SEEN_IDS_DIR = os.path.join(_BASE_DIR, "data", ".seen_ids")
-
 
 def _valid_timezone_name(value: str | None) -> str:
     """Return a valid IANA timezone name, falling back to UTC."""
@@ -46,11 +41,20 @@ def _valid_timezone_name(value: str | None) -> str:
     return tz_name
 
 
-def _seen_ids_file(account_id: str) -> str:
-    """Return a unique seen-IDs file path for an account."""
-    os.makedirs(_SEEN_IDS_DIR, exist_ok=True)
-    safe = "".join(c for c in account_id if c.isalnum() or c in "-_")
-    return os.path.join(_SEEN_IDS_DIR, f"{safe}.json")
+def _prune_stale_user_jobs(active_user_ids: set[str]) -> None:
+    """Remove stale per-user jobs for users no longer present in DB."""
+    for job in scheduler.get_jobs():
+        if not (job.id.startswith("sync_emails_") or job.id.startswith("notify_")):
+            continue
+
+        if job.id.startswith("sync_emails_"):
+            user_id = job.id[len("sync_emails_"):]
+        else:
+            user_id = job.id[len("notify_"):]
+
+        if user_id not in active_user_ids:
+            scheduler.remove_job(job.id)
+            logger.info("Removed stale scheduler job '%s'", job.id)
 
 
 # ---------------------------------------------------------------------------
@@ -86,8 +90,9 @@ def _process_gmail_account(
     try:
         emails = fetch_emails(
             gmail,
-            seen_ids_file=_seen_ids_file(account_id),
             after_epoch=after_epoch,
+            db=db,
+            seen_account_id=account_id,
         )
     except Exception as exc:
         logger.error("Failed to fetch emails for %s: %s", account_email, exc)
@@ -258,6 +263,9 @@ def schedule_notifications() -> None:
     db = Session()
     try:
         users = db.query(User).all()
+        active_user_ids = {str(user.id) for user in users}
+        _prune_stale_user_jobs(active_user_ids)
+
         for user in users:
             # ── Per-user email sync job ───────────────────────────────────────
             sync_hours = int(user.email_sync_hours or 24)
@@ -268,6 +276,9 @@ def schedule_notifications() -> None:
                     args=[user],
                     id=f"sync_emails_{user.id}",
                     replace_existing=True,
+                    coalesce=True,
+                    max_instances=1,
+                    misfire_grace_time=3600,
                 )
                 logger.debug(
                     "Scheduled email sync for %s every %sh",
@@ -291,6 +302,9 @@ def schedule_notifications() -> None:
                     args=[user],
                     id=f"notify_{user.id}",
                     replace_existing=True,
+                    coalesce=True,
+                    max_instances=1,
+                    misfire_grace_time=21600,
                 )
                 logger.debug(
                     "Scheduled daily notification for %s at %s (%s)",
@@ -314,6 +328,9 @@ def start_scheduler() -> None:
         IntervalTrigger(minutes=10),
         id="schedule_notifications",
         replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=1800,
     )
 
     scheduler.start()

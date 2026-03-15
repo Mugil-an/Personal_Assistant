@@ -1,7 +1,7 @@
 """SQLAlchemy models for multi-user Personal Assistant service."""
 
 import os
-from sqlalchemy import Column, Integer, String, JSON, create_engine
+from sqlalchemy import Column, Integer, String, JSON, create_engine, UniqueConstraint
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 Base = declarative_base()
@@ -54,36 +54,63 @@ class SenderPriority(Base):
         return f"<SenderPriority user_id={self.user_id!r} sender={self.sender!r} priority={self.priority!r}>"
 
 
+class SeenEmail(Base):
+    """Tracks already-processed Gmail message IDs per account."""
+
+    __tablename__ = "seen_emails"
+    __table_args__ = (
+        UniqueConstraint("account_id", "message_id", name="uq_seen_emails_account_message"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(String, nullable=False, index=True)
+    message_id = Column(String, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<SeenEmail account_id={self.account_id!r} message_id={self.message_id!r}>"
+
+
 # SQLite database stored in data/ at the project root
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_DATA_DIR = os.path.join(_BASE_DIR, "data")
-os.makedirs(_DATA_DIR, exist_ok=True)
+# _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# _DATA_DIR = os.path.join(_BASE_DIR, "data")
+# os.makedirs(_DATA_DIR, exist_ok=True)
+
+database_url = os.getenv("DATABASE_URL")
+if not database_url or not database_url.startswith("postgresql"):
+    raise ValueError("DATABASE_URL environment variable for PostgreSQL is not set. Please configure it in your .env file.")
 
 engine = create_engine(
-    f"sqlite:///{os.path.join(_DATA_DIR, 'users.db')}",
-    connect_args={"check_same_thread": False},  # needed for multi-threaded FastAPI
+    database_url
 )
 Base.metadata.create_all(engine)
 
 # Lightweight migration: add columns/tables if upgrading from an older schema
 from sqlalchemy import inspect, text as _text
-with engine.connect() as _conn:
-    _cols = [c["name"] for c in inspect(engine).get_columns("users")]
-    if "gmail_query" not in _cols:
-        _conn.execute(_text("ALTER TABLE users ADD COLUMN gmail_query VARCHAR"))
-        _conn.commit()
-    if "email_sync_hours" not in _cols:
-        _conn.execute(_text("ALTER TABLE users ADD COLUMN email_sync_hours INTEGER DEFAULT 24"))
-        _conn.commit()
-    if "sender_priorities" not in _cols:
-        _conn.execute(_text("ALTER TABLE users ADD COLUMN sender_priorities JSON DEFAULT '{}'"))
-        _conn.commit()
+# with engine.connect() as _conn:
+#     _cols = [c["name"] for c in inspect(engine).get_columns("users")]
+#     if "gmail_query" not in _cols:
+#         _conn.execute(_text("ALTER TABLE users ADD COLUMN gmail_query VARCHAR"))
+#         _conn.commit()
+#     if "email_sync_hours" not in _cols:
+#         _conn.execute(_text("ALTER TABLE users ADD COLUMN email_sync_hours INTEGER DEFAULT 24"))
+#         _conn.commit()
+#     if "sender_priorities" not in _cols:
+#         _conn.execute(_text("ALTER TABLE users ADD COLUMN sender_priorities JSON DEFAULT '{}'"))
+#         _conn.commit()
 
-    # Create the sender_priorities table if it doesn't exist
-    if not inspect(engine).has_table("sender_priorities"):
-        SenderPriority.__table__.create(engine)
+#     # Create the sender_priorities table if it doesn't exist
+#     if not inspect(engine).has_table("sender_priorities"):
+#         SenderPriority.__table__.create(engine)
 
 Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+def get_db():
+    """FastAPI dependency for database sessions."""
+    db = Session()
+    try:
+        yield db
+    finally:
+        db.close()
 
 # Perform data migration from users.sender_priorities JSON to sender_priorities table
 # This runs once on startup and safely converts legacy data into the new table.

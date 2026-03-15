@@ -4,11 +4,12 @@ import json
 import logging
 
 import requests as _requests
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from fastapi.responses import RedirectResponse
+from sqlalchemy.orm import Session as DBSession
 
 from app.auth_web import create_auth_flow
-from app.models import Session, User, LinkedAccount
+from app.models import Session, User, LinkedAccount, get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -20,12 +21,6 @@ STREAMLIT_URL = "http://localhost:8501"
 REDIRECT_URI       = f"{BASE_URL}/oauth/callback"
 LINK_REDIRECT_URI  = f"{BASE_URL}/link-account/callback"
 
-# In-memory store of OAuth flows keyed by state.
-# The callback must reuse the SAME flow instance that generated the auth URL.
-_pending_flows: dict = {}
-_link_pending_flows: dict = {}
-
-
 # ---------------------------------------------------------------------------
 # Primary account sign-up
 # ---------------------------------------------------------------------------
@@ -35,8 +30,10 @@ def signup():
     """Redirects the user to Google's OAuth2 consent screen."""
     flow = create_auth_flow(REDIRECT_URI)
     auth_url, state = flow.authorization_url(prompt="consent", access_type="offline")
-    _pending_flows[state] = flow
-    return RedirectResponse(auth_url)
+    response = RedirectResponse(auth_url)
+    response.set_cookie(key="oauth_state", value=state, httponly=True, max_age=1200, samesite="lax")
+    response.set_cookie(key="code_verifier", value=flow.code_verifier, httponly=True, max_age=1200, samesite="lax")
+    return response
 
 
 @router.get("/oauth/callback", summary="Google OAuth callback")
@@ -51,10 +48,14 @@ def oauth_callback(request: Request):
         raise HTTPException(status_code=400, detail="Missing 'code' parameter from Google.")
 
     state = request.query_params.get("state")
+    cookie_state = request.cookies.get("oauth_state")
+    code_verifier = request.cookies.get("code_verifier")
+    if not cookie_state or state != cookie_state:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state or session expired. Please try again.")
+
     try:
-        flow = _pending_flows.pop(state, None)
-        if flow is None:
-            flow = create_auth_flow(REDIRECT_URI, state=state)
+        flow = create_auth_flow(REDIRECT_URI, state=cookie_state)
+        flow.code_verifier = code_verifier
         flow.fetch_token(authorization_response=str(request.url))
         creds = flow.credentials
     except Exception as exc:
@@ -98,7 +99,10 @@ def oauth_callback(request: Request):
     finally:
         db.close()
 
-    return RedirectResponse(f"{STREAMLIT_URL}/?user_id={user_id}")
+    response = RedirectResponse(f"{STREAMLIT_URL}/?user_id={user_id}")
+    response.delete_cookie("oauth_state")
+    response.delete_cookie("code_verifier")
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -114,8 +118,11 @@ def link_account(owner_id: str = Query(..., description="Primary user ID")):
         access_type="offline",
         login_hint="",
     )
-    _link_pending_flows[state] = (flow, owner_id)
-    return RedirectResponse(auth_url)
+    response = RedirectResponse(auth_url)
+    response.set_cookie(key="oauth_link_state", value=state, httponly=True, max_age=1200, samesite="lax")
+    response.set_cookie(key="oauth_link_code_verifier", value=flow.code_verifier, httponly=True, max_age=1200, samesite="lax")
+    response.set_cookie(key="oauth_owner_id", value=owner_id, httponly=True, max_age=1200, samesite="lax")
+    return response
 
 
 @router.get("/link-account/callback", summary="OAuth callback for linked account")
@@ -129,12 +136,22 @@ def link_account_callback(request: Request):
     if not code:
         raise HTTPException(status_code=400, detail="Missing 'code' parameter.")
 
-    entry = _link_pending_flows.pop(state, None)
-    if entry is None:
-        raise HTTPException(status_code=400, detail="Unknown OAuth state. Please try again.")
-    flow, owner_id = entry
+    cookie_state = request.cookies.get("oauth_link_state")
+    code_verifier = request.cookies.get("oauth_link_code_verifier")
+    owner_id = request.cookies.get("oauth_owner_id")
+
+    if not cookie_state or state != cookie_state:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state or session expired. Please try again.")
+    
+    if not owner_id:
+        raise HTTPException(status_code=400, detail="Missing owner ID in session. Please try again.")
+
+    if not code_verifier:
+        raise HTTPException(status_code=400, detail="Missing PKCE verifier in session. Please restart linking.")
 
     try:
+        flow = create_auth_flow(LINK_REDIRECT_URI, state=cookie_state)
+        flow.code_verifier = code_verifier
         flow.fetch_token(authorization_response=str(request.url))
         creds = flow.credentials
     except Exception as exc:
@@ -182,17 +199,17 @@ def link_account_callback(request: Request):
     finally:
         db.close()
 
-    return RedirectResponse(f"{STREAMLIT_URL}/?user_id={owner_id}")
+    response = RedirectResponse(f"{STREAMLIT_URL}/?user_id={owner_id}")
+    response.delete_cookie("oauth_link_state")
+    response.delete_cookie("oauth_link_code_verifier")
+    response.delete_cookie("oauth_owner_id")
+    return response
 
 
 @router.get("/linked-accounts", summary="List linked Gmail accounts for a user")
-def list_linked_accounts(user_id: str = Query(...)):
-    db = Session()
-    try:
-        accounts = db.query(LinkedAccount).filter(LinkedAccount.owner_id == user_id).all()
-        return [{"id": a.id, "email": a.email} for a in accounts]
-    finally:
-        db.close()
+def list_linked_accounts(user_id: str = Query(...), db: DBSession = Depends(get_db)):
+    accounts = db.query(LinkedAccount).filter(LinkedAccount.owner_id == user_id).all()
+    return [{"id": a.id, "email": a.email} for a in accounts]
 
 
 @router.delete("/linked-accounts/{account_id}", summary="Remove a linked Gmail account")
@@ -232,12 +249,15 @@ def set_preferences(
         if not user:
             raise HTTPException(status_code=404, detail="User not found. Please sign up first.")
 
+        notify_email_final = (notify_email or "").strip() or user.email
+        gmail_query_final = gmail_query.strip() if isinstance(gmail_query, str) else gmail_query
+
         user.notify_time      = notify_time
         user.timezone         = timezone
-        user.notify_email     = notify_email
+        user.notify_email     = notify_email_final
         user.email_sync_hours = email_sync_hours
-        if gmail_query is not None:
-            user.gmail_query = gmail_query
+        if gmail_query_final is not None:
+            user.gmail_query = gmail_query_final
         db.commit()
     finally:
         db.close()
@@ -246,7 +266,7 @@ def set_preferences(
         "message":          "✅ Preferences saved!",
         "notify_time":      notify_time,
         "timezone":         timezone,
-        "notify_email":     notify_email,
-        "gmail_query":      gmail_query,
+        "notify_email":     notify_email_final,
+        "gmail_query":      gmail_query_final,
         "email_sync_hours": email_sync_hours,
     }

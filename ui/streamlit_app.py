@@ -11,7 +11,6 @@ import datetime
 import json
 import requests
 import streamlit as st
-from app.models import Session, LinkedAccount
 
 # --- Page config (must be first) ---
 st.set_page_config(
@@ -515,16 +514,31 @@ def _get(path, **params):
         return r.json(), None
     except requests.exceptions.ConnectionError:
         return None, "API server is offline"
+    except requests.exceptions.HTTPError as e:
+        try:
+            detail = r.json().get("detail")
+        except Exception:
+            detail = None
+        return None, detail or str(e)
     except Exception as e:
         return None, str(e)
 
 def _post(path, payload):
     try:
-        r = requests.post(f"{API}{path}", json=payload, timeout=60)
+        # Long-running sync can exceed 60s when parsing many emails.
+        r = requests.post(f"{API}{path}", json=payload, timeout=(10, 300))
         r.raise_for_status()
         return r.json(), None
     except requests.exceptions.ConnectionError:
         return None, "API server is offline"
+    except requests.exceptions.ReadTimeout:
+        return None, "Request timed out while server is still processing. Please wait and retry in a moment."
+    except requests.exceptions.HTTPError as e:
+        try:
+            detail = r.json().get("detail")
+        except Exception:
+            detail = None
+        return None, detail or str(e)
     except Exception as e:
         return None, str(e)
 
@@ -672,12 +686,14 @@ def _ph(icon, title, subtitle=""):
 if page == "Dashboard":
     _ph(_icon_chip("◈", "blue"), "Dashboard", f"Good to see you, {user['email'].split('@')[0]}.")
 
-    db = Session()
-    try:
-        linked_count = db.query(LinkedAccount).filter(LinkedAccount.owner_id == uid).count()
-    finally:
-        db.close()
+    # Fetch linked accounts via API if not already in session state
+    if "linked_accounts" not in st.session_state:
+        _la_data, _err = _get("/linked-accounts", user_id=uid)
+        st.session_state["linked_accounts"] = _la_data or []
+        if _err:
+                st.error(f"Sync failed: {err}")
 
+    linked_count = len(st.session_state.get("linked_accounts", []))
     sync_h = int(user.get("email_sync_hours") or 24)
     digest_hour = int((user.get("notify_time") or "07:00").split(":")[0])
     account_total = 1 + linked_count
@@ -729,7 +745,7 @@ if page == "Dashboard":
                     _run_payload["gmail_query"] = user["gmail_query"]
                 res, err = _post("/api/run-assistant", _run_payload)
             if err:
-                st.error("Something went wrong. Please try again.")
+                st.error(f"Sync failed: {err}")
             else:
                 n_mail = int(res.get("emails_processed", len(res.get("details", []))))
                 n_evt  = int(res.get("events_created", 0))
@@ -739,8 +755,8 @@ if page == "Dashboard":
                     st.success(f"Sync complete — {n_mail} email(s) reviewed. Only important/scheduled emails are added to calendar.")
                 else:
                     st.info(
-                        f"✓ Sync complete. No emails found in your mailbox.\\n\\n"
-                        f"Tip: Use the **Senders** page to prioritize important senders."
+                        "✓ Sync complete. No emails found in your mailbox.\n\n"
+                        "Tip: Use the **Senders** page to prioritize important senders."
                     )
                 if res.get("details"):
                     with st.expander("View details"):
@@ -844,6 +860,8 @@ elif page == "Preferences":
             st.markdown(f"##### {_icon_chip('◉', 'orange')} Notification Settings", unsafe_allow_html=True)
             with st.form("prefs"):
                 h, m = map(int, user.get("notify_time", "07:00").split(":"))
+                default_notify_email = (user.get("notify_email") or user.get("email") or "").strip()
+                default_query_value = (user.get("gmail_query") or cfg.get("gmail_query") or "").strip()
                 notify_time  = st.time_input("Daily notification time", value=datetime.time(h, m))
                 tz           = st.selectbox(
                     "Timezone", options=TIMEZONES,
@@ -852,12 +870,12 @@ elif page == "Preferences":
                 )
                 notify_email = st.text_input(
                     "Notification email",
-                    value=user.get("notify_email") or "",
+                    value=default_notify_email,
                     placeholder="you@example.com",
                 )
                 gmail_query_val = st.text_input(
                     "Gmail search query",
-                    value=user.get("gmail_query") or cfg.get("gmail_query", ""),
+                    value=default_query_value,
                     placeholder="subject:meeting OR subject:appointment",
                     help="Emails matching this query are scanned during each sync.",
                 )
@@ -871,13 +889,15 @@ elif page == "Preferences":
                 )
                 if st.form_submit_button("💾 Save Preferences", use_container_width=True, type="primary"):
                     nt_str = notify_time.strftime("%H:%M")
+                    notify_email_to_save = (notify_email or user.get("email") or "").strip()
+                    gmail_query_to_save = (gmail_query_val or "").strip()
                     try:
                         r = requests.post(
                             f"{API}/preferences",
                             params={
                                 "user_id": uid, "notify_time": nt_str,
-                                "timezone": tz, "notify_email": notify_email,
-                                "gmail_query": gmail_query_val,
+                                "timezone": tz, "notify_email": notify_email_to_save,
+                                "gmail_query": gmail_query_to_save,
                                 "email_sync_hours": int(email_sync_hours_val),
                             },
                             timeout=10,
@@ -885,7 +905,8 @@ elif page == "Preferences":
                         r.raise_for_status()
                         st.session_state["user"].update({
                             "notify_time": nt_str, "timezone": tz,
-                            "notify_email": notify_email, "gmail_query": gmail_query_val,
+                            "notify_email": notify_email_to_save,
+                            "gmail_query": gmail_query_to_save,
                             "email_sync_hours": int(email_sync_hours_val),
                         })
                         st.toast("Settings saved.", icon="✅")
@@ -897,9 +918,9 @@ elif page == "Preferences":
             st.markdown(f"##### {_icon_chip('≡', 'blue')} Current Settings", unsafe_allow_html=True)
             st.markdown(f"**Notify Time:** &nbsp;`{user.get('notify_time', '—')}`", unsafe_allow_html=True)
             st.markdown(f"**Timezone:** &nbsp;`{user.get('timezone', '—')}`", unsafe_allow_html=True)
-            notify_val = user.get("notify_email") or "_not set_"
+            notify_val = (user.get("notify_email") or user.get("email") or "_not set_")
             st.markdown(f"**Notify Email:** &nbsp;{notify_val}", unsafe_allow_html=True)
-            query_val = user.get("gmail_query") or cfg.get("gmail_query") or "_default_"
+            query_val = (user.get("gmail_query") or cfg.get("gmail_query") or "").strip() or "all emails (default)"
             st.markdown(f"**Gmail Query:** &nbsp;`{query_val}`", unsafe_allow_html=True)
             st.markdown(f"**Sync Interval:** &nbsp;`Every {user.get('email_sync_hours', 24)}h`", unsafe_allow_html=True)
             st.markdown(f"**Account:** &nbsp;{user.get('email', '—')}", unsafe_allow_html=True)
@@ -1050,4 +1071,3 @@ elif page == "Accounts":
             '➕ Connect Gmail Account</button></a>',
             unsafe_allow_html=True,
         )
-

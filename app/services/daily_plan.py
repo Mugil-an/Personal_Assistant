@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import re
 
 from dateutil import parser as dt_parser
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import CALENDAR_ID, TIMEZONE
 
@@ -60,6 +61,43 @@ def _parse_event_start(start: Dict[str, Any]) -> datetime | None:
         return None
 
 
+def _is_transient_network_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    patterns = [
+        r"timed out",
+        r"timeout",
+        r"connection aborted",
+        r"connection reset",
+        r"unexpected eof",
+        r"temporary failure",
+        r"ssl",
+        r"winerror\s*10053",
+        r"winerror\s*10060",
+        r"unable to find the server",
+    ]
+    return any(re.search(p, text) for p in patterns)
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True,
+)
+def _list_calendar_events(service: Any, start_of_day: str, end_of_day: str) -> Dict[str, Any]:
+    """Read one day's events with retry/backoff for transient failures."""
+    return (
+        service.events()
+        .list(
+            calendarId=CALENDAR_ID,
+            timeMin=start_of_day,
+            timeMax=end_of_day,
+            singleEvents=True,
+            orderBy="startTime",
+        )
+        .execute()
+    )
+
+
 def get_today_schedule(service: Any) -> str:
     """Return a human-friendly summary of today's calendar events."""
 
@@ -73,19 +111,10 @@ def get_today_schedule(service: Any) -> str:
     end_of_day = end_of_day_local.astimezone(timezone.utc).isoformat()
 
     try:
-        events_result = (
-            service.events()
-            .list(
-                calendarId=CALENDAR_ID,
-                timeMin=start_of_day,
-                timeMax=end_of_day,
-                singleEvents=True,
-                orderBy="startTime",
-            )
-            .execute()
-        )
+        events_result = _list_calendar_events(service, start_of_day, end_of_day)
     except Exception as exc:
-        logger.error("Failed to fetch today's schedule from calendar: %s", exc)
+        level = logger.warning if _is_transient_network_error(exc) else logger.error
+        level("Failed to fetch today's schedule from calendar after retries: %s", exc)
         return "■ Could not fetch today's schedule due to an error."
 
     events: List[Dict[str, Any]] = events_result.get("items", [])
