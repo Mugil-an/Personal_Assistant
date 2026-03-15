@@ -20,8 +20,6 @@ COPY . /app
 # Create a directory for tokens
 RUN mkdir -p /app/tokens
 
-# The command to run the application will be specified in docker-compose.yml
-# This makes the Dockerfile more reusable for different environments.
-# Example command is provided in docker-compose.yml
-CMD ["/app/wait-for-postgres.sh", "uvicorn", "web_app:app", "--host", "0.0.0.0", "--port", "8000"]
+# Use Render-provided PORT in production; keep 8000 as local fallback.
+CMD ["sh", "-c", "/app/wait-for-postgres.sh uvicorn web_app:app --host 0.0.0.0 --port ${PORT:-8000}"]
 
