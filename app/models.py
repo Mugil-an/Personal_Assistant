@@ -117,7 +117,16 @@ def get_db():
 import json
 db = Session()
 try:
-    users_with_json = db.execute(_text("SELECT id, sender_priorities FROM users WHERE sender_priorities IS NOT NULL AND sender_priorities != '{}'")).mappings().all()
+    users_with_json = db.execute(
+        _text(
+            """
+            SELECT id, sender_priorities
+            FROM users
+            WHERE sender_priorities IS NOT NULL
+              AND CAST(sender_priorities AS TEXT) <> '{}' 
+            """
+        )
+    ).mappings().all()
     if users_with_json:
         for user_row in users_with_json:
             user_id = user_row["id"]

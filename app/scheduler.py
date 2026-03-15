@@ -19,6 +19,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.auth_web import get_user_services
+from app.config import SCHEDULER_REFRESH_MINUTES
 from app.services.calendar_manager import create_event
 from app.services.daily_plan import get_today_schedule
 from app.services.email_parser import enrich_email_analysis, parse_email_with_gemini
@@ -322,10 +323,10 @@ def schedule_notifications() -> None:
 
 def start_scheduler() -> None:
     """Register all jobs and start the background scheduler."""
-    # Refresh per-user jobs every 10 minutes so preference changes apply quickly
+    # Refresh per-user jobs periodically so preference changes apply quickly.
     scheduler.add_job(
         schedule_notifications,
-        IntervalTrigger(minutes=10),
+        IntervalTrigger(minutes=SCHEDULER_REFRESH_MINUTES),
         id="schedule_notifications",
         replace_existing=True,
         coalesce=True,
@@ -334,7 +335,7 @@ def start_scheduler() -> None:
     )
 
     scheduler.start()
-    logger.info("Scheduler started.")
+    logger.info("Scheduler started (refresh every %s minute(s)).", SCHEDULER_REFRESH_MINUTES)
 
     # Immediately upsert per-user sync + notification jobs for existing users
     schedule_notifications()

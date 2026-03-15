@@ -36,6 +36,15 @@ try:
 except ValueError:
     DEFAULT_EVENT_DURATION_MIN = 60
 
+# Interval in minutes for reloading per-user scheduler jobs.
+try:
+    SCHEDULER_REFRESH_MINUTES: int = int(os.getenv("SCHEDULER_REFRESH_MINUTES", "10"))
+except ValueError:
+    SCHEDULER_REFRESH_MINUTES = 10
+
+if SCHEDULER_REFRESH_MINUTES < 1:
+    SCHEDULER_REFRESH_MINUTES = 10
+
 # --- Email notification configuration (Gmail SMTP) ---
 
 # The Gmail address you want to send notifications FROM
@@ -47,3 +56,6 @@ NOTIFY_EMAIL_PASSWORD: str | None = os.getenv("NOTIFY_EMAIL_PASSWORD")
 
 # Default recipient email (used for single-user / main.py mode)
 NOTIFY_EMAIL_TO: str | None = os.getenv("NOTIFY_EMAIL_TO")
+
+# Admin API key used to protect operational endpoints (e.g. scheduler status)
+ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "")
