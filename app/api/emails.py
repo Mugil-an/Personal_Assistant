@@ -13,7 +13,7 @@ from app.services.calendar_manager import create_event
 from app.services.daily_plan import get_today_schedule
 from app.services.email_parser import enrich_email_analysis, parse_email_with_gemini
 from app.services.gmail_reader import fetch_emails
-from app.services.notifier import send_whatsapp
+from app.services.notifier import send_daily_schedule
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -191,7 +191,7 @@ def run_assistant(req: RunAssistantRequest):
                         "-" * 40,
                     ]
                 )
-            send_whatsapp("\n".join(lines), to=user.notify_email)
+            send_daily_schedule("\n".join(lines), to=user.notify_email)
 
         return {
             "message": f"Assistant run complete. Found {len(all_emails)} emails, created {events_created} events.",

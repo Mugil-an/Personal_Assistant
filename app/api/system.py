@@ -5,14 +5,17 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, HTTPException, Query
+from sqlalchemy import or_
 
+from app.auth_web import get_user_services
 from app.config import (
     ADMIN_API_KEY,
     CALENDAR_ID, DEFAULT_EVENT_DURATION_MIN,
     GMAIL_MAX_RESULTS, GMAIL_QUERY, TIMEZONE,
 )
 from app.models import Session, User
-from app.services.daily_plan import send_daily_schedule
+from app.services.daily_plan import get_today_schedule
+from app.services.notifier import send_daily_schedule
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -121,19 +124,24 @@ def check_schedules():
     try:
         users_to_notify = db.query(User).filter(
             User.notify_time == now_str,
-            User.last_schedule_sent != today_str
+            or_(User.last_schedule_sent.is_(None), User.last_schedule_sent != today_str),
         ).all()
 
         logger.info(f"Found {len(users_to_notify)} users to notify at {now_str}.")
 
         for user in users_to_notify:
             try:
-                logger.info(f"Sending schedule to user {user.id} ({user.email})")
-                send_daily_schedule(user.id)
+                if not user.notify_email:
+                    logger.warning("No notification email set for %s; skipping schedule send.", user.email)
+                    continue
+                logger.info("Sending schedule to user %s (%s)", user.id, user.email)
+                _, calendar = get_user_services(user.token_json, db=db, db_obj=user)
+                schedule = get_today_schedule(calendar)
+                send_daily_schedule(schedule, to=user.notify_email)
                 user.last_schedule_sent = today_str
                 db.commit()
             except Exception as e:
-                logger.error(f"Failed to send schedule to user {user.id}: {e}")
+                logger.error("Failed to send schedule to user %s: %s", user.id, e)
                 db.rollback()
 
         return {"status": "checked", "notified_count": len(users_to_notify)}

@@ -12,7 +12,7 @@ from app.config import (
 logger = logging.getLogger(__name__)
 
 
-def send_whatsapp(message_body: str, to: str | None = None) -> None:
+def send_daily_schedule(message_body: str, to: str | None = None) -> None:
     """Send the daily schedule as an email via Gmail SMTP.
 
     Parameters

@@ -99,6 +99,13 @@ Base.metadata.create_all(engine)
 # Lightweight migration: add columns/tables if upgrading from an older schema
 from sqlalchemy import inspect, text as _text
 
+inspector = inspect(engine)
+if "last_schedule_sent" not in [c["name"] for c in inspector.get_columns("users")]:
+    print("Adding last_schedule_sent column to users table")
+    with engine.connect() as conn:
+        conn.execute(_text('ALTER TABLE users ADD COLUMN last_schedule_sent VARCHAR'))
+        conn.commit()
+
 #     _cols = [c["name"] for c in inspect(engine).get_columns("users")]
 #     if "gmail_query" not in _cols:
 #         _conn.execute(_text("ALTER TABLE users ADD COLUMN gmail_query VARCHAR"))

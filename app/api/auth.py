@@ -201,12 +201,6 @@ def link_account_callback(request: Request, db: DBSession = Depends(get_db)):
     response.delete_cookie("oauth_owner_id")
     return response
 
-    response = RedirectResponse(f"{STREAMLIT_URL}/?user_id={owner_id}")
-    response.delete_cookie("oauth_link_state")
-    response.delete_cookie("oauth_link_code_verifier")
-    response.delete_cookie("oauth_owner_id")
-    return response
-
 
 @router.get("/linked-accounts", summary="List linked Gmail accounts for a user")
 def list_linked_accounts(user_id: str = Query(...), db: DBSession = Depends(get_db)):

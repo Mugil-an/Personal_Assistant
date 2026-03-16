@@ -26,7 +26,7 @@ from app.services.daily_plan import get_today_schedule
 from app.services.email_parser import enrich_email_analysis, parse_email_with_gemini
 from app.services.gmail_reader import fetch_emails
 from app.models import Session, User, LinkedAccount, SenderPriority
-from app.services.notifier import send_whatsapp
+from app.services.notifier import send_daily_schedule
 
 logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler(timezone="UTC")
@@ -249,7 +249,7 @@ def notify_user(user: User) -> None:
             return
         _, calendar = get_user_services(user_db.token_json, db=db, db_obj=user_db)
         schedule = get_today_schedule(calendar)
-        send_whatsapp(schedule, to=user_db.notify_email)
+        send_daily_schedule(schedule, to=user_db.notify_email)
     except Exception as exc:
         logger.error("Error notifying %s: %s", user.email, exc)
     finally:
