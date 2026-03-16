@@ -1,13 +1,13 @@
-name: Run Daily Schedule
+name: Check User Schedules
 
 on:
   schedule:
-    - cron: "30 4 * * *"
+    - cron: "*/5 * * * *"
 
 jobs:
   trigger-api:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Call Render API
-        run: curl https://personal-assistant-8occ.onrender.com/run-daily-schedule
+      - name: Call API to check schedules
+        run: curl https://personal-assistant-8occ.onrender.com/api/system/check-schedules

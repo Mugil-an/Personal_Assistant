@@ -21,6 +21,7 @@ class User(Base):
     gmail_query       = Column(String, nullable=True)   # custom Gmail search query (deprecated: now fetch all)
     email_sync_hours  = Column(Integer, default=24)     # hours to look back when fetching emails
     sender_priorities = Column(JSON, default={})        # {"sender@example.com": "high"|"medium"|"low"}
+    last_schedule_sent = Column(String, nullable=True) # YYYY-MM-DD of last schedule send
 
     def __repr__(self) -> str:
         return f"<User id={self.id!r} email={self.email!r} notify_time={self.notify_time!r}>"

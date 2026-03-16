@@ -12,6 +12,7 @@ from app.config import (
     GMAIL_MAX_RESULTS, GMAIL_QUERY, TIMEZONE,
 )
 from app.models import Session, User
+from app.services.daily_plan import send_daily_schedule
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -104,3 +105,37 @@ def scheduler_jobs(x_admin_key: str | None = Header(default=None, alias="X-Admin
     except Exception as exc:
         logger.error("Failed to list scheduler jobs: %s", exc)
         raise HTTPException(status_code=500, detail=f"Could not read scheduler jobs: {exc}")
+
+
+@router.get("/check-schedules", summary="Check and trigger scheduled user notifications")
+def check_schedules():
+    """
+    Check for users whose notification time matches the current time and who
+    haven't been sent a schedule today.
+    """
+    now = datetime.now()
+    now_str = now.strftime("%H:%M")
+    today_str = now.strftime("%Y-%m-%d")
+    
+    db = Session()
+    try:
+        users_to_notify = db.query(User).filter(
+            User.notify_time == now_str,
+            User.last_schedule_sent != today_str
+        ).all()
+
+        logger.info(f"Found {len(users_to_notify)} users to notify at {now_str}.")
+
+        for user in users_to_notify:
+            try:
+                logger.info(f"Sending schedule to user {user.id} ({user.email})")
+                send_daily_schedule(user.id)
+                user.last_schedule_sent = today_str
+                db.commit()
+            except Exception as e:
+                logger.error(f"Failed to send schedule to user {user.id}: {e}")
+                db.rollback()
+
+        return {"status": "checked", "notified_count": len(users_to_notify)}
+    finally:
+        db.close()
