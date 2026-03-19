@@ -3,6 +3,7 @@
 import hmac
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from sqlalchemy import or_
@@ -122,20 +123,49 @@ def check_schedules(x_admin_key: str | None = Header(default=None, alias="X-Admi
     haven't been sent a schedule today.
     """
     _require_admin_key(x_admin_key)
-    now = datetime.now()
-    now_str = now.strftime("%H:%M")
-    today_str = now.strftime("%Y-%m-%d")
-    
     db = Session()
     try:
-        users_to_notify = db.query(User).filter(
-            User.notify_time == now_str,
-            or_(User.last_schedule_sent.is_(None), User.last_schedule_sent != today_str),
-        ).all()
+        users = db.query(User).all()
+        to_notify = []
 
-        logger.info(f"Found {len(users_to_notify)} users to notify at {now_str}.")
+        for user in users:
+            if not user.notify_time:
+                continue
 
-        for user in users_to_notify:
+            tz_name = user.timezone or "UTC"
+            try:
+                user_tz = ZoneInfo(tz_name)
+            except ZoneInfoNotFoundError:
+                logger.warning("Invalid user timezone '%s'; falling back to UTC", tz_name)
+                user_tz = ZoneInfo("UTC")
+
+            now_local = datetime.now(user_tz)
+            today_str = now_local.strftime("%Y-%m-%d")
+
+            if user.last_schedule_sent == today_str:
+                continue
+
+            try:
+                hour_str, minute_str = user.notify_time.split(":")
+                notify_hour = int(hour_str)
+                notify_minute = int(minute_str)
+            except Exception:
+                logger.warning("Invalid notify_time '%s' for user %s", user.notify_time, user.id)
+                continue
+
+            notify_at = now_local.replace(
+                hour=notify_hour,
+                minute=notify_minute,
+                second=0,
+                microsecond=0,
+            )
+
+            if now_local >= notify_at:
+                to_notify.append(user)
+
+        logger.info("Found %d users to notify.", len(to_notify))
+
+        for user in to_notify:
             try:
                 if not user.notify_email:
                     logger.warning("No notification email set for %s; skipping schedule send.", user.email)
@@ -144,13 +174,13 @@ def check_schedules(x_admin_key: str | None = Header(default=None, alias="X-Admi
                 _, calendar = get_user_services(user.token_json, db=db, db_obj=user)
                 schedule = get_today_schedule(calendar)
                 send_daily_schedule(schedule, to=user.notify_email)
-                user.last_schedule_sent = today_str
+                user.last_schedule_sent = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 db.commit()
             except Exception as e:
                 logger.error("Failed to send schedule to user %s: %s", user.id, e)
                 db.rollback()
 
-        return {"status": "checked", "notified_count": len(users_to_notify)}
+        return {"status": "checked", "notified_count": len(to_notify)}
     finally:
         db.close()
 

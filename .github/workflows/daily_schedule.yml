@@ -12,5 +12,3 @@ jobs:
     steps:
       - name: Call API to check schedules
         run: curl -H "X-Admin-Key: ${{ secrets.ADMIN_API_KEY }}" https://personal-assistant-8occ.onrender.com/check-schedules
-      - name: Call API to check email syncs
-        run: curl -H "X-Admin-Key: ${{ secrets.ADMIN_API_KEY }}" https://personal-assistant-8occ.onrender.com/check-email-syncs

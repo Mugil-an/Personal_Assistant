@@ -1,0 +1,14 @@
+name: Check Email Syncs
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+jobs:
+  trigger-api:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Call API to check email syncs
+        run: curl -H "X-Admin-Key: ${{ secrets.ADMIN_API_KEY }}" https://personal-assistant-8occ.onrender.com/check-email-syncs
