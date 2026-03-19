@@ -14,11 +14,23 @@ from app.config import (
     GMAIL_MAX_RESULTS, GMAIL_QUERY, TIMEZONE,
 )
 from app.models import Session, User
+from app.scheduler import process_emails_for_user
 from app.services.daily_plan import get_today_schedule
 from app.services.notifier import send_daily_schedule
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _require_admin_key(x_admin_key: str | None) -> None:
+    if not ADMIN_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="Admin endpoint is disabled. Set ADMIN_API_KEY in environment.",
+        )
+
+    if not x_admin_key or not hmac.compare_digest(x_admin_key, ADMIN_API_KEY):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 @router.get("/", summary="Health check")
@@ -63,14 +75,7 @@ def scheduler_jobs(x_admin_key: str | None = Header(default=None, alias="X-Admin
     Useful in deployment to confirm per-user sync and notification jobs are
     scheduled with expected next-run times.
     """
-    if not ADMIN_API_KEY:
-        raise HTTPException(
-            status_code=503,
-            detail="Admin endpoint is disabled. Set ADMIN_API_KEY in environment.",
-        )
-
-    if not x_admin_key or not hmac.compare_digest(x_admin_key, ADMIN_API_KEY):
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    _require_admin_key(x_admin_key)
 
     try:
         from app.scheduler import scheduler
@@ -111,11 +116,12 @@ def scheduler_jobs(x_admin_key: str | None = Header(default=None, alias="X-Admin
 
 
 @router.get("/check-schedules", summary="Check and trigger scheduled user notifications")
-def check_schedules():
+def check_schedules(x_admin_key: str | None = Header(default=None, alias="X-Admin-Key")):
     """
     Check for users whose notification time matches the current time and who
     haven't been sent a schedule today.
     """
+    _require_admin_key(x_admin_key)
     now = datetime.now()
     now_str = now.strftime("%H:%M")
     today_str = now.strftime("%Y-%m-%d")
@@ -145,5 +151,54 @@ def check_schedules():
                 db.rollback()
 
         return {"status": "checked", "notified_count": len(users_to_notify)}
+    finally:
+        db.close()
+
+
+@router.get("/check-email-syncs", summary="Check and trigger scheduled email syncs")
+def check_email_syncs(x_admin_key: str | None = Header(default=None, alias="X-Admin-Key")):
+    """Trigger per-user email syncs when their interval window is due."""
+    _require_admin_key(x_admin_key)
+    now_utc = datetime.now(timezone.utc)
+
+    db = Session()
+    try:
+        users = db.query(User).all()
+        due_users = []
+
+        for user in users:
+            sync_hours = int(user.email_sync_hours or 24)
+            if sync_hours < 1:
+                continue
+
+            last_sync_at = None
+            if user.last_email_sync_at:
+                try:
+                    last_sync_at = datetime.fromisoformat(user.last_email_sync_at)
+                except ValueError:
+                    last_sync_at = None
+
+            if not last_sync_at:
+                due_users.append(user)
+                continue
+
+            elapsed = (now_utc - last_sync_at).total_seconds()
+            if elapsed >= sync_hours * 3600:
+                due_users.append(user)
+
+        logger.info("Found %d users due for email sync.", len(due_users))
+
+        synced = 0
+        for user in due_users:
+            try:
+                process_emails_for_user(user)
+                user.last_email_sync_at = now_utc.isoformat()
+                db.commit()
+                synced += 1
+            except Exception as exc:
+                logger.error("Failed to sync emails for user %s: %s", user.id, exc)
+                db.rollback()
+
+        return {"status": "checked", "synced_count": synced}
     finally:
         db.close()

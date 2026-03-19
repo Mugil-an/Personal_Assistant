@@ -1067,7 +1067,7 @@ elif page == "Accounts":
         st.markdown(f"##### {_icon_chip('+', 'green')} Add Account", unsafe_allow_html=True)
         st.caption("Connect another Gmail account to sync all your emails in one place.")
         st.markdown(
-            f'<a href="{API}/link-account?owner_id={uid}" target="_self" style="text-decoration:none;">'
+            f'<a href="{PUBLIC_API}/link-account?owner_id={uid}" target="_self" style="text-decoration:none;">'
             '<button class="pa-link-btn">'
             '➕ Connect Gmail Account</button></a>',
             unsafe_allow_html=True,

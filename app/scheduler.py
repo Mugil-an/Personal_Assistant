@@ -123,6 +123,12 @@ def _process_gmail_account(
             if att.get("extracted_text")
         ]
 
+        full_description = body
+        if pdf_texts:
+            combined_pdf = "\n\n".join(text for text in pdf_texts if text)
+            if combined_pdf:
+                full_description = f"{body}\n\n[PDF Attachment Text]\n{combined_pdf[:2000]}"
+
         parsed = parse_email_with_gemini(
             body,
             attachment_texts=pdf_texts or None,
@@ -175,7 +181,7 @@ def _process_gmail_account(
         if should_create_event:
             try:
                 date_hints = analysis.get("entities", {}).get("dates", [])
-                create_event(calendar_service, subject, body, date_hints=date_hints)
+                create_event(calendar_service, subject, full_description, date_hints=date_hints)
                 events_created += 1
                 logger.info("Created calendar event for %s", subject)
             except Exception as e:

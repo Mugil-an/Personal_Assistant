@@ -22,6 +22,7 @@ class User(Base):
     email_sync_hours  = Column(Integer, default=24)     # hours to look back when fetching emails
     sender_priorities = Column(JSON, default={})        # {"sender@example.com": "high"|"medium"|"low"}
     last_schedule_sent = Column(String, nullable=True) # YYYY-MM-DD of last schedule send
+    last_email_sync_at = Column(String, nullable=True) # ISO timestamp of last email sync
 
     def __repr__(self) -> str:
         return f"<User id={self.id!r} email={self.email!r} notify_time={self.notify_time!r}>"
@@ -104,6 +105,12 @@ if "last_schedule_sent" not in [c["name"] for c in inspector.get_columns("users"
     print("Adding last_schedule_sent column to users table")
     with engine.connect() as conn:
         conn.execute(_text('ALTER TABLE users ADD COLUMN last_schedule_sent VARCHAR'))
+        conn.commit()
+
+if "last_email_sync_at" not in [c["name"] for c in inspector.get_columns("users")]:
+    print("Adding last_email_sync_at column to users table")
+    with engine.connect() as conn:
+        conn.execute(_text('ALTER TABLE users ADD COLUMN last_email_sync_at VARCHAR'))
         conn.commit()
 
 #     _cols = [c["name"] for c in inspect(engine).get_columns("users")]

@@ -99,6 +99,11 @@ def run_assistant(req: RunAssistantRequest):
                 for att in email.get("attachments", [])
                 if att.get("extracted_text")
             ]
+            full_description = body
+            if pdf_texts:
+                combined_pdf = "\n\n".join(text for text in pdf_texts if text)
+                if combined_pdf:
+                    full_description = f"{body}\n\n[PDF Attachment Text]\n{combined_pdf[:2000]}"
             parsed = parse_email_with_gemini(
                 body,
                 attachment_texts=pdf_texts or None,
@@ -149,7 +154,7 @@ def run_assistant(req: RunAssistantRequest):
                         calendar,
                         summary=summary,
                         location=analysis.get("location"),
-                        description=body,
+                        description=full_description,
                         date_hints=date_hints,
                     )
                     if created:
