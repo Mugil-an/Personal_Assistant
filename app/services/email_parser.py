@@ -99,11 +99,11 @@ and extract key information in a structured JSON format.
 {pdf_section}
 **Instructions:**
 1.  **Identify the primary intent.** If the email discusses a scheduled event, appointment, deadline, webinar, or any activity at a specific date/time, classify the intent as **"Event Scheduling"**. Other intents could be "Information Sharing", "Task Assignment", "Spam", etc.
-2.  **Extract ALL specific dates and deadlines** mentioned. Return them as full, unambiguous strings (e.g., "April 13 2026", "2026-04-13 14:00"). Do not return vague terms like "tomorrow" or "next week".
+2.  **Extract ALL specific dates and deadlines** mentioned, including those deep within PDF attachments (e.g., event dates, submission deadlines). Return them as full, unambiguous strings (e.g., "April 13 2026", "2026-04-13 14:00"). Do not return vague terms like "tomorrow" or "next week".
 3.  **Extract key entities,** such as names of people, organizations, and locations.
 4.  **Summarize the email** in one or two sentences.
 5.  **Suggest a concrete next action** (e.g., "Add deadline to calendar," "Reply to sender").
-6.  **Assign exactly one email category** from this list only: **"Event"**, **"Promotion"**, **"Personal"**, **"Important"**.
+6.  **Assign exactly one email category** from this list only: **"Event"**, **"Promotion"**, **"Personal"**, **"Important"**. Be strict: if it is a newsletter, update, or marketing, mark it as "Promotion" so it can be filtered out.
 7.  **Prioritize the email** with one of these values only: **"High"**, **"Medium"**, **"Low"**. Use **"High"** for urgent, deadline-driven, executive, financial, or action-required messages.
 8.  **Detect if this email has an imminent deadline.** Set `has_deadline` to `true` if:
     - The email mentions a specific deadline, due date, or submission date that is upcoming (within the next 7 days)

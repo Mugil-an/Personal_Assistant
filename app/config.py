@@ -15,7 +15,7 @@ GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 # Users can set a custom query in preferences if desired
 GMAIL_QUERY: str = os.getenv(
     "GMAIL_QUERY",
-    "",  # Empty = fetch all emails in the time window
+    "meeting OR scheduled OR deadline OR urgent OR invite",  # Default Gmail search query
 )
 
 # Maximum number of Gmail messages to fetch in a single run

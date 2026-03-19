@@ -1,7 +1,7 @@
 """SQLAlchemy models for multi-user Personal Assistant service."""
 
 import os
-from sqlalchemy import Column, Integer, String, JSON, create_engine, UniqueConstraint
+from sqlalchemy import Column, Integer, String, JSON, Boolean, create_engine, UniqueConstraint
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 Base = declarative_base()
@@ -54,6 +54,23 @@ class SenderPriority(Base):
 
     def __repr__(self) -> str:
         return f"<SenderPriority user_id={self.user_id!r} sender={self.sender!r} priority={self.priority!r}>"
+
+
+class SenderFilter(Base):
+    """Per-sender exclusion flags for a user."""
+
+    __tablename__ = "sender_filters"
+    __table_args__ = (
+        UniqueConstraint("user_id", "sender", name="uq_sender_filters_user_sender"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String, nullable=False)
+    sender = Column(String, nullable=False)
+    excluded = Column(Boolean, default=False)
+
+    def __repr__(self) -> str:
+        return f"<SenderFilter user_id={self.user_id!r} sender={self.sender!r} excluded={self.excluded!r}>"
 
 
 class SeenEmail(Base):

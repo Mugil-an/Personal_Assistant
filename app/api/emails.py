@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 
 from app.auth_web import get_user_services
-from app.models import User, LinkedAccount, SenderPriority, get_db, Session
+from app.models import User, LinkedAccount, SenderPriority, SenderFilter, get_db, Session
 from app.services.calendar_manager import create_event
 from app.services.daily_plan import get_today_schedule
 from app.services.email_parser import enrich_email_analysis, parse_email_with_gemini
@@ -89,10 +89,18 @@ def run_assistant(req: RunAssistantRequest):
         # Preload sender priorities once to avoid N+1 queries.
         sp_records = db.query(SenderPriority).filter(SenderPriority.user_id == user.id).all()
         sender_priorities = {sp.sender: sp.priority for sp in sp_records}
+        excluded_senders = {
+            row.sender
+            for row in db.query(SenderFilter)
+            .filter(SenderFilter.user_id == user.id, SenderFilter.excluded.is_(True))
+            .all()
+        }
 
         for email in all_emails:
             subject = email.get("subject", "")
             sender  = _normalize_sender(email.get("from_", ""))
+            if sender and sender in excluded_senders:
+                continue
             body    = email.get("body", "")
             pdf_texts = [
                 att.get("extracted_text")
@@ -132,6 +140,8 @@ def run_assistant(req: RunAssistantRequest):
             # Extract date_hints from entities dictionary
             entities = analysis.get("entities", {})
             date_hints = entities.get("dates", []) if isinstance(entities, dict) else []
+            locations = entities.get("locations", []) if isinstance(entities, dict) else []
+            location_str = ", ".join(locations) if isinstance(locations, list) and locations else None
             
             created = False
 
@@ -143,7 +153,7 @@ def run_assistant(req: RunAssistantRequest):
             should_create_event = (
                 category not in ["Promotion", "Personal"] and (
                     category == "Event" or
-                    (category == "Important" and priority in ["High", "Medium"]) or
+                    (category == "Important" and priority in ["High", "Medium"] and date_hints) or
                     (has_deadline and date_hints)
                 )
             )
@@ -152,8 +162,8 @@ def run_assistant(req: RunAssistantRequest):
                 try:
                     created = create_event(
                         calendar,
-                        summary=summary,
-                        location=analysis.get("location"),
+                        summary=subject,
+                        location=location_str,
                         description=full_description,
                         date_hints=date_hints,
                     )
@@ -196,7 +206,12 @@ def run_assistant(req: RunAssistantRequest):
                         "-" * 40,
                     ]
                 )
-            send_daily_schedule("\n".join(lines), to=user.notify_email)
+            send_daily_schedule(
+                "\n".join(lines),
+                to=user.notify_email,
+                gmail_service=gmail,
+                from_email=user.email,
+            )
 
         return {
             "message": f"Assistant run complete. Found {len(all_emails)} emails, created {events_created} events.",
@@ -215,6 +230,13 @@ def api_fetch_emails(req: FetchEmailsRequest):
         user = db.get(User, req.user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found.")
+
+        excluded_senders = {
+            row.sender
+            for row in db.query(SenderFilter)
+            .filter(SenderFilter.user_id == req.user_id, SenderFilter.excluded.is_(True))
+            .all()
+        }
 
         db_obj = None
         if req.linked_account_id:
@@ -245,6 +267,8 @@ def api_fetch_emails(req: FetchEmailsRequest):
         for email in emails:
             subject = email.get("subject", "")
             sender = _normalize_sender(email.get("from_", ""))
+            if sender and sender in excluded_senders:
+                continue
             body = email.get("body", "")
             pdf_texts = [
                 att.get("extracted_text")
@@ -311,6 +335,12 @@ def get_senders(user_id: str = Query(...)):
             raise HTTPException(status_code=404, detail="User not found.")
             
         senders_records = db.query(SenderPriority).filter(SenderPriority.user_id == user_id).all()
+        excluded_senders = {
+            row.sender
+            for row in db.query(SenderFilter)
+            .filter(SenderFilter.user_id == user_id, SenderFilter.excluded.is_(True))
+            .all()
+        }
 
         # Deduplicate sender rows defensively to avoid repeated entries in UI.
         unique_senders = {}
@@ -322,6 +352,7 @@ def get_senders(user_id: str = Query(...)):
                 unique_senders[sender_key] = {
                     "email": sender_key,
                     "priority": record.priority,
+                    "excluded": sender_key in excluded_senders,
                 }
 
         response_data = {
@@ -377,6 +408,47 @@ def update_sender_priority(req: UpdateSenderPriorityRequest):
         
         return {
             "message": f"Priority for {normalized_sender} updated to {req.priority}",
+        }
+    finally:
+        db.close()
+
+
+class UpdateSenderFilterRequest(BaseModel):
+    user_id: str
+    sender: str
+    excluded: bool
+
+
+@router.post("/api/sender-filters")
+def update_sender_filter(req: UpdateSenderFilterRequest):
+    """Update exclusion status for a specific sender in the database."""
+    normalized_sender = _normalize_sender(req.sender)
+    if not normalized_sender:
+        raise HTTPException(status_code=400, detail="Sender is required")
+
+    db = Session()
+    try:
+        user = db.get(User, req.user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found.")
+
+        record = db.query(SenderFilter).filter(
+            SenderFilter.user_id == req.user_id,
+            SenderFilter.sender == normalized_sender,
+        ).first()
+
+        if record:
+            record.excluded = bool(req.excluded)
+        else:
+            db.add(SenderFilter(
+                user_id=req.user_id,
+                sender=normalized_sender,
+                excluded=bool(req.excluded),
+            ))
+
+        db.commit()
+        return {
+            "message": f"Sender {normalized_sender} excluded={bool(req.excluded)}",
         }
     finally:
         db.close()

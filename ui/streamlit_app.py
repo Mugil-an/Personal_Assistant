@@ -877,7 +877,7 @@ elif page == "Preferences":
                 gmail_query_val = st.text_input(
                     "Gmail search query",
                     value=default_query_value,
-                    placeholder="subject:meeting OR subject:appointment",
+                    placeholder="scheduled",
                     help="Emails matching this query are scanned during each sync.",
                 )
                 email_sync_hours_val = st.number_input(
@@ -951,18 +951,19 @@ elif page == "Senders":
         with st.container(border=True):
             st.markdown(f"##### {_icon_chip('≣', 'green')} Found {len(senders_list)} Unique Sender(s)", unsafe_allow_html=True)
             st.markdown(
-                "<div class='pa-table-head'><span>Sender</span><span>Domain</span><span>Current</span><span>Set Priority</span><span>Action</span></div>",
+                "<div class='pa-table-head'><span>Sender</span><span>Domain</span><span>Current</span><span>Excluded</span><span>Set Priority</span><span>Action</span></div>",
                 unsafe_allow_html=True,
             )
 
             for i, sender_obj in enumerate(senders_list):
                 sender_email = sender_obj.get("email", "")
                 current_priority = sender_obj.get("priority", "medium")
+                is_excluded = bool(sender_obj.get("excluded", False))
                 sender_domain = sender_email.split("@")[-1] if "@" in sender_email else "-"
                 current_label = current_priority.capitalize()
                 current_badge = PRIORITY_COLOR.get(current_label, "b-gray")
                 
-                col1, col2, col3, col4, col5 = st.columns([3, 1.35, 1.15, 1.4, 1])
+                col1, col2, col3, col4, col5, col6 = st.columns([3, 1.35, 1.15, 1.1, 1.4, 1])
                 
                 with col1:
                     st.markdown(f"**{sender_email}**")
@@ -973,6 +974,14 @@ elif page == "Senders":
                     st.markdown(f"<span class='badge {current_badge}'>{current_label}</span>", unsafe_allow_html=True)
                 
                 with col4:
+                    excluded_selected = st.checkbox(
+                        "Exclude",
+                        value=is_excluded,
+                        key=f"exclude_{i}_{sender_email}",
+                        label_visibility="collapsed",
+                    )
+
+                with col5:
                     priority_options = ["High", "Medium", "Low"]
                     current_idx = {"high": 0, "medium": 1, "low": 2}.get(current_priority.lower(), 1)
                     selected = st.selectbox(
@@ -983,8 +992,9 @@ elif page == "Senders":
                         label_visibility="collapsed",
                     )
                 
-                with col5:
+                with col6:
                     if st.button("Save", key=f"save_{i}_{sender_email}", use_container_width=True):
+                        _err = None
                         _update_res, _err = _post(
                             "/api/sender-priorities",
                             {
@@ -995,8 +1005,19 @@ elif page == "Senders":
                         )
                         if _err:
                             st.toast(f"Could not update {sender_email}: {_err}", icon="❌")
-                        else:
-                            st.toast(f"✓ {sender_email} set to {selected}", icon="✅")
+                        _filter_res, _filter_err = _post(
+                            "/api/sender-filters",
+                            {
+                                "user_id": uid,
+                                "sender": sender_email,
+                                "excluded": bool(excluded_selected),
+                            }
+                        )
+                        if _filter_err:
+                            st.toast(f"Could not update exclusion for {sender_email}: {_filter_err}", icon="❌")
+
+                        if not _err and not _filter_err:
+                            st.toast(f"✓ {sender_email} updated", icon="✅")
                             st.session_state.pop("senders_list", None)
                             st.rerun()
 

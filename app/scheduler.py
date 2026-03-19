@@ -25,7 +25,7 @@ from app.services.calendar_manager import create_event
 from app.services.daily_plan import get_today_schedule
 from app.services.email_parser import enrich_email_analysis, parse_email_with_gemini
 from app.services.gmail_reader import fetch_emails
-from app.models import Session, User, LinkedAccount, SenderPriority
+from app.models import Session, User, LinkedAccount, SenderPriority, SenderFilter
 from app.services.notifier import send_daily_schedule
 
 logger = logging.getLogger(__name__)
@@ -79,6 +79,7 @@ def _process_gmail_account(
     calendar_service,
     sync_hours: int = 24,
     sender_priorities: dict | None = None,
+    excluded_senders: set[str] | None = None,
 ) -> int:
     """Fetch new emails from one Gmail account and create calendar events.
 
@@ -87,6 +88,7 @@ def _process_gmail_account(
     """
     events_created = 0
     sender_priorities = sender_priorities or {}
+    excluded_senders = excluded_senders or set()
     try:
         gmail, _ = get_user_services(gmail_token, db=db, db_obj=db_obj)
     except Exception as exc:
@@ -114,6 +116,8 @@ def _process_gmail_account(
     for email in emails:
         subject = email.get("subject", "")
         sender  = _normalize_sender(email.get("from_", ""))
+        if sender and sender in excluded_senders:
+            continue
         body    = email.get("body", "")
 
         # Collect PDF attachment texts to feed into Gemini
@@ -140,7 +144,7 @@ def _process_gmail_account(
         user_id = getattr(db_obj, "owner_id", getattr(db_obj, "id", account_id))
         
         # Check if this sender already exists in the priority table
-        if sender and sender not in sender_priorities:
+        if sender and sender not in sender_priorities and sender not in excluded_senders:
             # Check DB to see if they were added recently
             existing = db.query(SenderPriority).filter(
                 SenderPriority.user_id == user_id,
@@ -162,6 +166,9 @@ def _process_gmail_account(
         category = analysis.get("category", "")
         priority = analysis.get("priority", "Medium")
         dates  = analysis.get("entities", {}).get("dates", [])
+        has_deadline = analysis.get("has_deadline", False)
+        locations = analysis.get("entities", {}).get("locations", [])
+        location_str = ", ".join(locations) if isinstance(locations, list) and locations else None
         logger.info(
             "[%s] '%s' → category=%s priority=%s intent=%s dates=%s",
             account_email,
@@ -172,16 +179,26 @@ def _process_gmail_account(
             dates,
         )
 
-        # Add to calendar only if: Event category OR (Important category AND High/Medium priority)
+        # Add to calendar strictly for events/deadlines, ignoring unimportant ones
         should_create_event = (
-            category == "Event" or 
-            (category == "Important" and priority in ["High", "Medium"])
+            category not in ["Promotion", "Personal"] and (
+                category == "Event" or 
+                (has_deadline and dates) or
+                # Only add Important emails to calendar if dates were actually found
+                (category == "Important" and priority in ["High", "Medium"] and dates)
+            )
         )
 
         if should_create_event:
             try:
                 date_hints = analysis.get("entities", {}).get("dates", [])
-                create_event(calendar_service, subject, full_description, date_hints=date_hints)
+                create_event(
+                    calendar_service, 
+                    summary=subject, 
+                    description=full_description, 
+                    location=location_str,
+                    date_hints=date_hints
+                )
                 events_created += 1
                 logger.info("Created calendar event for %s", subject)
             except Exception as e:
@@ -215,6 +232,12 @@ def process_emails_for_user(user: User) -> None:
         # Pre-load sender priorities from DB into a dict
         sp_records = db.query(SenderPriority).filter(SenderPriority.user_id == user_db.id).all()
         sender_priorities = {sp.sender: sp.priority for sp in sp_records}
+        excluded_senders = {
+            row.sender
+            for row in db.query(SenderFilter)
+            .filter(SenderFilter.user_id == user_db.id, SenderFilter.excluded.is_(True))
+            .all()
+        }
 
         # Build the primary user's calendar service once
         try:
@@ -226,7 +249,17 @@ def process_emails_for_user(user: User) -> None:
         total = 0
 
         # --- Primary Gmail account ---
-        total += _process_gmail_account(db, user_db, user_db.id, user_db.email, user_db.token_json, calendar, sync_hours, sender_priorities)
+        total += _process_gmail_account(
+            db,
+            user_db,
+            user_db.id,
+            user_db.email,
+            user_db.token_json,
+            calendar,
+            sync_hours,
+            sender_priorities,
+            excluded_senders,
+        )
 
         # --- Linked Gmail accounts ---
         linked_accounts = db.query(LinkedAccount).filter(
@@ -234,7 +267,17 @@ def process_emails_for_user(user: User) -> None:
         ).all()
 
         for acct in linked_accounts:
-            total += _process_gmail_account(db, acct, acct.id, acct.email, acct.token_json, calendar, sync_hours, sender_priorities)
+            total += _process_gmail_account(
+                db,
+                acct,
+                acct.id,
+                acct.email,
+                acct.token_json,
+                calendar,
+                sync_hours,
+                sender_priorities,
+                excluded_senders,
+            )
 
         logger.info("Finished processing for %s — %d event(s) created", user_db.email, total)
     finally:
@@ -253,9 +296,14 @@ def notify_user(user: User) -> None:
         user_db = db.get(User, user.id)
         if not user_db:
             return
-        _, calendar = get_user_services(user_db.token_json, db=db, db_obj=user_db)
+        gmail, calendar = get_user_services(user_db.token_json, db=db, db_obj=user_db)
         schedule = get_today_schedule(calendar)
-        send_daily_schedule(schedule, to=user_db.notify_email)
+        send_daily_schedule(
+            schedule,
+            to=user_db.notify_email,
+            gmail_service=gmail,
+            from_email=user_db.email,
+        )
     except Exception as exc:
         logger.error("Error notifying %s: %s", user.email, exc)
     finally:
