@@ -31,7 +31,7 @@ services:
     volumes:
       - ./tokens:/app/tokens
       - ./credentials.json:/app/credentials.json:ro
-    command: ["/app/wait-for-postgres.sh", "uvicorn", "web_app:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["/app/wait-for-postgres.sh", "python", "run.py"]
     restart: unless-stopped
 
   ui:

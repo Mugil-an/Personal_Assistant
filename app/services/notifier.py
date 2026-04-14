@@ -40,10 +40,13 @@ def send_daily_schedule(
         logger.error("No recipient email address. Set NOTIFY_EMAIL_TO in .env or pass 'to' argument.")
         return
 
+    if not sender:
+        logger.error("No sender email address configured.")
+        return
+
     msg = MIMEMultipart("alternative")
     msg["Subject"] = "\U0001f4c5 Your Daily Schedule"
-    if sender:
-        msg["From"] = sender
+    msg["From"] = sender
     msg["To"] = recipient
     msg.attach(MIMEText(message_body, "plain"))
 
@@ -66,7 +69,7 @@ def send_daily_schedule(
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
             smtp.login(NOTIFY_EMAIL_FROM, NOTIFY_EMAIL_PASSWORD)
-            smtp.send_message(msg)
+            smtp.send_message(msg, from_addr=NOTIFY_EMAIL_FROM)
         logger.info("Schedule email sent to %s via SMTP", recipient)
     except smtplib.SMTPAuthenticationError:
         logger.error(
